@@ -13,6 +13,8 @@ type Config struct {
 	DataDir         string
 	DAVUser         string
 	DAVPassword     string
+	AdminUser       string
+	AdminPassword   string
 	BasePath        string
 	MaxUploadBytes  int64
 	ConflictPolicy  string
@@ -31,6 +33,8 @@ func LoadConfigFromEnv() (Config, error) {
 		DataDir:         env("MOONDAV_DATA_DIR", "/data"),
 		DAVUser:         os.Getenv("MOONDAV_DAV_USER"),
 		DAVPassword:     os.Getenv("MOONDAV_DAV_PASSWORD"),
+		AdminUser:       os.Getenv("MOONDAV_ADMIN_USER"),
+		AdminPassword:   os.Getenv("MOONDAV_ADMIN_PASSWORD"),
 		BasePath:        cleanBasePath(env("MOONDAV_BASE_PATH", "/dav/")),
 		MaxUploadBytes:  envInt64("MOONDAV_MAX_UPLOAD_BYTES", 8<<20),
 		ConflictPolicy:  strings.ToLower(env("MOONDAV_CONFLICT_POLICY", "furthest")),
@@ -44,6 +48,9 @@ func LoadConfigFromEnv() (Config, error) {
 	}
 	if c.DAVUser == "" || c.DAVPassword == "" {
 		return c, errors.New("MOONDAV_DAV_USER and MOONDAV_DAV_PASSWORD are required")
+	}
+	if c.AdminUser == "" || c.AdminPassword == "" {
+		return c, errors.New("MOONDAV_ADMIN_USER and MOONDAV_ADMIN_PASSWORD are required")
 	}
 	if c.ConflictPolicy != "furthest" && c.ConflictPolicy != "latest" {
 		return c, errors.New("MOONDAV_CONFLICT_POLICY must be furthest or latest")
