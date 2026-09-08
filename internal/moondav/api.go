@@ -27,7 +27,7 @@ func (a *App) apiDashboard(w http.ResponseWriter, r *http.Request) {
 	states := a.state.Snapshot()
 	maps := a.bookMap.Snapshot()
 	books := make([]dashboardBook, 0, len(states))
-	var conflicts, unmapped, errors int
+	var conflicts, unmapped, errors, queued int
 	for key, e := range states {
 		id, mapped := maps[key]
 		status := "synced"
@@ -35,6 +35,9 @@ func (a *App) apiDashboard(w http.ResponseWriter, r *http.Request) {
 		case e.LastError != "":
 			status = "error"
 			errors++
+		case e.PendingSync:
+			status = "queued"
+			queued++
 		case !mapped && a.cfg.BackendType != "none":
 			status = "unmapped"
 			unmapped++
@@ -55,7 +58,8 @@ func (a *App) apiDashboard(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{
 		"backend": a.cfg.BackendType,
 		"books": books,
-		"summary": map[string]int{"books": len(books), "conflicts": conflicts, "unmapped": unmapped, "errors": errors},
+		"summary": map[string]int{"books": len(books), "conflicts": conflicts, "unmapped": unmapped, "errors": errors, "queued": queued},
+		"backend_health": a.state.Health(),
 	})
 }
 
@@ -130,7 +134,11 @@ func (a *App) apiConflicts(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "state write failed", http.StatusInternalServerError)
 			return
 		}
-		go a.push(strings.ToLower(v.BookKey), entry.Percent)
+		entry.PendingSync = true
+		entry.PendingPercent = entry.Percent
+		entry.NextRetryAt = time.Now().UTC()
+		_ = a.state.Put(strings.ToLower(v.BookKey), entry)
+		go a.push(strings.ToLower(v.BookKey))
 	case "ignore-until-caught-up":
 		entry.SuppressRemoteUntilPct = entry.BackendPercent
 		entry.RemoteAhead = false
