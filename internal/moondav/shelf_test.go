@@ -152,10 +152,10 @@ func TestOPDSProxyRewritesAndStreamsWithoutCaching(t *testing.T) {
 
 	dataRoot := app.cfg.DataDir
 	entries, err := os.ReadDir(filepath.Join(dataRoot, "webdav"))
-	if err != nil {
+	if err != nil && !os.IsNotExist(err) {
 		t.Fatal(err)
 	}
-	if len(entries) != 0 {
+	if err == nil && len(entries) != 0 {
 		t.Fatalf("proxy must not cache book files in WebDAV storage: %+v", entries)
 	}
 }
