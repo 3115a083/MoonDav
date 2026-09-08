@@ -10,6 +10,7 @@ RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH}     go build -trimpath -
 
 FROM gcr.io/distroless/static-debian12:nonroot
 COPY --from=build /out/moondav /moondav
+COPY --chown=65532:65532 --from=build /out/data /data
 USER 65532:65532
 EXPOSE 8765
 VOLUME ["/data"]
