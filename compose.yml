@@ -9,6 +9,10 @@ services:
       - "127.0.0.1:8765:8765"
     volumes:
       - moondav-data:/data
+      # Enable with MOONDAV_EXACT_POSITIONS=true:
+      # - /path/to/your/calibre-library:/books:ro
+      # Shared Shelf filesystem mode, optional:
+      # - /path/to/canonical-ebook-shelf:/shelf:ro
     read_only: true
     tmpfs:
       - /tmp:size=8m,mode=1777
