@@ -1,5 +1,7 @@
 # MoonDav
 
+> **Beta:** MoonDav is under active development. Back up `/data` before upgrades and review release notes before deploying a new beta.
+
 MoonDav is a small WebDAV bridge for Moon+ Reader Pro. It preserves Moon+'s native position files for reliable Moon+-to-Moon+ synchronization and can mirror normalized reading progress into Calibre-Web or a KOReader-compatible backend such as BookLore.
 
 > [!IMPORTANT]
@@ -35,7 +37,7 @@ Copy this `compose.yml`:
 ```yaml
 services:
   moondav:
-    image: ghcr.io/3115a083/moondav:latest
+    image: ghcr.io/3115a083/moondav:beta
     container_name: moondav
     restart: unless-stopped
     env_file:
@@ -351,7 +353,7 @@ go build ./cmd/moondav
 docker build -t moondav .
 ```
 
-GitHub Actions tests the Go service and builds the Dockerfile for `linux/amd64` and `linux/arm64`. Pushes to `main` and version tags publish to:
+GitHub Actions tests the Go service and builds the Dockerfile for `linux/amd64` and `linux/arm64`. Pushes to `main` publish the beta image. Version tags also publish versioned images to:
 
 ```text
 ghcr.io/3115a083/moondav
@@ -377,3 +379,10 @@ Until then MoonDav provides exact Moon+-to-Moon+ sync, safe Moon+ progress mirro
 - BookLore OPDS: https://booklore.org/docs/integration/opds
 - Calibre Content Server: https://manual.calibre-ebook.com/server.html
 - Pangolin Shareable Links: https://docs.pangolin.net/manage/access-control/links
+
+
+## Repository security
+
+Repository-enforced safeguards include CodeQL, Dependabot, CODEOWNERS, a pull-request security checklist, and least-privilege GitHub Actions permissions.
+
+GitHub-hosted settings such as branch rulesets, Actions defaults, Dependabot alerts, secret scanning, and merge policy must also be enabled in the repository settings. See `docs/GITHUB_SECURITY.md`.
