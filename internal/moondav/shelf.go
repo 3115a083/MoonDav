@@ -37,6 +37,53 @@ type shelfIndex struct {
 	files []shelfFile
 }
 
+type shelfTargetEntry struct {
+	url *url.URL
+	at  time.Time
+}
+
+type shelfTargetStore struct {
+	mu      sync.Mutex
+	targets map[string]shelfTargetEntry
+}
+
+func (s *shelfTargetStore) put(target *url.URL) string {
+	sum := sha256.Sum256([]byte(target.String()))
+	id := base64.RawURLEncoding.EncodeToString(sum[:18])
+	now := time.Now()
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.targets == nil {
+		s.targets = make(map[string]shelfTargetEntry)
+	}
+	if len(s.targets) >= 4096 {
+		var oldestID string
+		var oldest time.Time
+		for key, entry := range s.targets {
+			if oldestID == "" || entry.at.Before(oldest) {
+				oldestID = key
+				oldest = entry.at
+			}
+		}
+		delete(s.targets, oldestID)
+	}
+	copyTarget := *target
+	s.targets[id] = shelfTargetEntry{url: &copyTarget, at: now}
+	return id
+}
+
+func (s *shelfTargetStore) get(id string) (*url.URL, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	entry, ok := s.targets[id]
+	if !ok || entry.url == nil {
+		return nil, false
+	}
+	copyTarget := *entry.url
+	return &copyTarget, true
+}
+
 func (a *App) shelfHandler() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet && r.Method != http.MethodHead {
@@ -144,25 +191,20 @@ func (a *App) shelfTargetURL(r *http.Request) (*url.URL, error) {
 	if err != nil || base.Scheme == "" || base.Host == "" {
 		return nil, fmt.Errorf("invalid shelf URL")
 	}
-	encoded := r.URL.Query().Get("u")
-	if encoded == "" {
+	id := r.URL.Query().Get("id")
+	if id == "" {
 		if r.URL.Path != "/opds" && r.URL.Path != "/opds/" {
 			return nil, fmt.Errorf("missing target")
 		}
 		return base, nil
 	}
-	raw, err := base64.RawURLEncoding.DecodeString(encoded)
-	if err != nil {
-		return nil, err
+	if r.URL.Path != "/opds/proxy" {
+		return nil, fmt.Errorf("invalid proxy path")
 	}
-	ref, err := url.Parse(string(raw))
-	if err != nil {
-		return nil, err
+	target, ok := a.shelfTargets.get(id)
+	if !ok {
+		return nil, fmt.Errorf("unknown shelf target")
 	}
-	if ref.IsAbs() || ref.Host != "" || ref.User != nil {
-		return nil, fmt.Errorf("proxied shelf target must be relative")
-	}
-	target := base.ResolveReference(ref)
 	if target.Scheme != base.Scheme || !strings.EqualFold(target.Host, base.Host) {
 		return nil, fmt.Errorf("target leaves configured OPDS origin")
 	}
@@ -188,12 +230,8 @@ func (a *App) rewriteOPDSLinks(body []byte, current *url.URL) []byte {
 		if err != nil || resolved.Scheme != base.Scheme || !strings.EqualFold(resolved.Host, base.Host) {
 			return match
 		}
-		relative := resolved.EscapedPath()
-		if resolved.RawQuery != "" {
-			relative += "?" + resolved.RawQuery
-		}
-		token := base64.RawURLEncoding.EncodeToString([]byte(relative))
-		replacement := "/opds/proxy?u=" + url.QueryEscape(token)
+		id := a.shelfTargets.put(resolved)
+		replacement := "/opds/proxy?id=" + url.QueryEscape(id)
 		return []byte(fmt.Sprintf(`%s="%s"`, parts[1], html.EscapeString(replacement)))
 	})
 }
