@@ -1,6 +1,6 @@
 services:
   moondav:
-    image: ghcr.io/3115a083/moondav:latest
+    image: ghcr.io/3115a083/moondav:beta
     container_name: moondav
     restart: unless-stopped
     env_file:
