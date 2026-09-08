@@ -150,6 +150,62 @@ func (a *App) koboToMoon(bookKey string, loc ReadingLocation, percent float64, b
 	return MoonPosition{}, fmt.Errorf("KoboSpan %q not found in %q", loc.Value, source)
 }
 
+
+func (a *App) readStoredMoonPosition(entry StateEntry) (MoonPosition, error) {
+	local, err := a.localDAVPath(entry.Path)
+	if err != nil {
+		return MoonPosition{}, err
+	}
+	b, err := os.ReadFile(local)
+	if err != nil {
+		return MoonPosition{}, err
+	}
+	p := ParseMoonPosition(b)
+	if !p.Valid {
+		return MoonPosition{}, errors.New("stored Moon+ position is invalid")
+	}
+	return p, nil
+}
+
+func (a *App) writeStoredMoonPosition(entry StateEntry, p MoonPosition) error {
+	local, err := a.localDAVPath(entry.Path)
+	if err != nil {
+		return err
+	}
+	b, err := EncodeMoonPosition(p)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(local), 0700); err != nil {
+		return err
+	}
+	tmp := local + ".tmp"
+	if err := os.WriteFile(tmp, b, 0600); err != nil {
+		return err
+	}
+	return os.Rename(tmp, local)
+}
+
+func (a *App) localDAVPath(requestPath string) (string, error) {
+	p := filepath.ToSlash(requestPath)
+	base := filepath.ToSlash(a.cfg.BasePath)
+	if !strings.HasPrefix(p, base) {
+		return "", errors.New("position path is outside WebDAV base")
+	}
+	rel := strings.TrimPrefix(p, base)
+	clean := filepath.Clean(filepath.FromSlash(rel))
+	if clean == "." || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+		return "", errors.New("invalid WebDAV position path")
+	}
+	root := filepath.Join(a.cfg.DataDir, "webdav")
+	full := filepath.Join(root, clean)
+	r, err := filepath.Rel(root, full)
+	if err != nil || r == ".." || strings.HasPrefix(r, ".."+string(filepath.Separator)) {
+		return "", errors.New("WebDAV position path escapes data root")
+	}
+	return full, nil
+}
+
 func (a *App) safeLibraryPath(rel string) (string, error) {
 	if a.cfg.LibraryRoot == "" {
 		return "", errors.New("MOONDAV_LIBRARY_ROOT is not configured")
