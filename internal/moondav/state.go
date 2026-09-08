@@ -9,12 +9,14 @@ import (
 )
 
 type StateEntry struct {
-	Path             string    `json:"path"`
-	Percent          float64   `json:"percent"`
-	UpdatedAt        time.Time `json:"updated_at"`
-	BackendPercent   float64   `json:"backend_percent,omitempty"`
-	BackendUpdatedAt time.Time `json:"backend_updated_at,omitempty"`
-	RemoteAhead      bool      `json:"remote_ahead,omitempty"`
+	Path                   string    `json:"path"`
+	Percent                float64   `json:"percent"`
+	UpdatedAt              time.Time `json:"updated_at"`
+	BackendPercent         float64   `json:"backend_percent,omitempty"`
+	BackendUpdatedAt       time.Time `json:"backend_updated_at,omitempty"`
+	RemoteAhead            bool      `json:"remote_ahead,omitempty"`
+	SuppressRemoteUntilPct float64   `json:"suppress_remote_until_percent,omitempty"`
+	LastError              string    `json:"last_error,omitempty"`
 }
 
 type StateStore struct {
