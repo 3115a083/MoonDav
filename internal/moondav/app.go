@@ -57,6 +57,8 @@ func (a *App) Handler() http.Handler {
 	mux.HandleFunc("/api/mappings", a.adminAuth(a.apiMappings))
 	mux.HandleFunc("/api/conflicts", a.adminAuth(a.apiConflicts))
 	mux.HandleFunc("/status", a.adminAuth(a.status))
+	mux.HandleFunc("/opds", a.davAuth(a.shelfHandler()))
+	mux.HandleFunc("/opds/", a.davAuth(a.shelfHandler()))
 	mux.Handle(a.cfg.BasePath, a.davAuth(a.davHandler()))
 	return secureHeaders(mux)
 }
@@ -384,6 +386,7 @@ func (a *App) status(w http.ResponseWriter, r *http.Request) {
 		"base_path": a.cfg.BasePath,
 		"entries":   a.state.Snapshot(),
 		"backend_health": a.state.Health(),
+		"shelf_mode": a.cfg.ShelfMode,
 	})
 }
 
