@@ -67,8 +67,10 @@
       node.querySelector('.moon-bar').style.width = moonPercent + '%';
       node.querySelector('.backend-bar').style.width = backendPercent + '%';
 
-      const mapInput = node.querySelector('.mapping-input');
+      const mapInput = node.querySelector('.backend-input');
+      const epubInput = node.querySelector('.epub-input');
       mapInput.value = book.backend_id || '';
+      epubInput.value = book.epub_path || '';
 
       node.querySelector('.save-map').addEventListener('click', async () => {
         const backendID = mapInput.value.trim();
@@ -76,7 +78,7 @@
         try {
           await api('/api/mappings', {
             method: 'POST',
-            body: JSON.stringify({ book_key: book.key, backend_id: backendID })
+            body: JSON.stringify({ book_key: book.key, backend_id: backendID, epub_path: epubInput.value.trim() })
           });
           flash('Mapping saved.');
           await load();
