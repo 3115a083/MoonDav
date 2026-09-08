@@ -18,6 +18,17 @@ type Backend interface {
 	Pull(bookID string) (float64, time.Time, error)
 }
 
+type BackendReadingState struct {
+	Percent   float64
+	UpdatedAt time.Time
+	Location  *ReadingLocation
+}
+
+type ExactLocationBackend interface {
+	PushState(bookID string, percent float64, location *ReadingLocation) error
+	PullState(bookID string) (BackendReadingState, error)
+}
+
 type BackendError struct {
 	Temporary bool
 	Message   string
@@ -62,12 +73,16 @@ func (b *CalibreWebBackend) stateURL(id string) string {
 }
 
 func (b *CalibreWebBackend) Push(id string, percent float64) error {
+	return b.PushState(id, percent, nil)
+}
+
+func (b *CalibreWebBackend) PushState(id string, percent float64, location *ReadingLocation) error {
 	status := "Reading"
 	if percent >= 99.5 {
 		status = "Finished"
 	}
 	payload := map[string]any{"ReadingStates": []any{map[string]any{
-		"CurrentBookmark": map[string]any{"ProgressPercent": percent, "ContentSourceProgressPercent": percent, "Location": nil},
+		"CurrentBookmark": map[string]any{"ProgressPercent": percent, "ContentSourceProgressPercent": percent, "Location": location},
 		"Statistics":      nil,
 		"StatusInfo":      map[string]any{"Status": status},
 	}}}
@@ -87,25 +102,38 @@ func (b *CalibreWebBackend) Push(id string, percent float64) error {
 }
 
 func (b *CalibreWebBackend) Pull(id string) (float64, time.Time, error) {
+	state, err := b.PullState(id)
+	if err != nil {
+		return 0, time.Time{}, err
+	}
+	return state.Percent, state.UpdatedAt, nil
+}
+
+func (b *CalibreWebBackend) PullState(id string) (BackendReadingState, error) {
 	resp, err := b.client.Get(b.stateURL(id))
 	if err != nil {
-		return 0, time.Time{}, networkError("calibre-web pull", err)
+		return BackendReadingState{}, networkError("calibre-web pull", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode/100 != 2 {
-		return 0, time.Time{}, classifyHTTP("calibre-web pull", resp.StatusCode, "")
+		return BackendReadingState{}, classifyHTTP("calibre-web pull", resp.StatusCode, "")
 	}
 	var v []struct {
 		LastModified    string `json:"LastModified"`
 		CurrentBookmark struct {
-			ProgressPercent float64 `json:"ProgressPercent"`
+			ProgressPercent float64          `json:"ProgressPercent"`
+			Location        *ReadingLocation `json:"Location"`
 		} `json:"CurrentBookmark"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&v); err != nil || len(v) == 0 {
-		return 0, time.Time{}, &BackendError{Temporary: false, Message: "invalid calibre-web state"}
+		return BackendReadingState{}, &BackendError{Temporary: false, Message: "invalid calibre-web state"}
 	}
 	t, _ := time.Parse(time.RFC3339, v[0].LastModified)
-	return v[0].CurrentBookmark.ProgressPercent, t, nil
+	return BackendReadingState{
+		Percent: v[0].CurrentBookmark.ProgressPercent,
+		UpdatedAt: t,
+		Location: v[0].CurrentBookmark.Location,
+	}, nil
 }
 
 type KOBackend struct {
