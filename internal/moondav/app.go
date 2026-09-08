@@ -158,7 +158,7 @@ func (a *App) push(bookKey string) {
 	entry.LastSyncAttempt = time.Now().UTC()
 	_ = a.state.Put(bookKey, entry)
 
-	if err := a.backend.Push(bookID, target); err != nil {
+	if err := a.pushBackendState(bookKey, bookID, target, entry); err != nil {
 		a.syncFailure(bookKey, err)
 		return
 	}
@@ -179,6 +179,59 @@ func (a *App) push(bookKey string) {
 		latest.SuppressRemoteUntilPct = 0
 	}
 	_ = a.state.Put(bookKey, latest)
+}
+
+func (a *App) pushBackendState(bookKey, bookID string, percent float64, entry StateEntry) error {
+	exact, ok := a.backend.(ExactLocationBackend)
+	if !ok || !a.cfg.ExactPositions {
+		return a.backend.Push(bookID, percent)
+	}
+	moon, err := a.readStoredMoonPosition(entry)
+	if err != nil {
+		return a.backend.Push(bookID, percent)
+	}
+	location, err := a.moonToKobo(bookKey, moon)
+	if err != nil {
+		return a.backend.Push(bookID, percent)
+	}
+	return exact.PushState(bookID, percent, location)
+}
+
+func (a *App) pullBackendState(bookID string) (BackendReadingState, error) {
+	if exact, ok := a.backend.(ExactLocationBackend); ok && a.cfg.ExactPositions {
+		return exact.PullState(bookID)
+	}
+	percent, updated, err := a.backend.Pull(bookID)
+	return BackendReadingState{Percent: percent, UpdatedAt: updated}, err
+}
+
+func (a *App) applyRemoteExact(bookKey string, entry StateEntry, remote BackendReadingState) bool {
+	if remote.Location == nil || !a.cfg.ExactPositions {
+		return false
+	}
+	base, err := a.readStoredMoonPosition(entry)
+	if err != nil {
+		return false
+	}
+	translated, err := a.koboToMoon(bookKey, *remote.Location, remote.Percent, base)
+	if err != nil {
+		return false
+	}
+	if err := a.writeStoredMoonPosition(entry, translated); err != nil {
+		return false
+	}
+	entry.Percent = remote.Percent
+	entry.UpdatedAt = time.Now().UTC()
+	entry.BackendPercent = remote.Percent
+	entry.BackendUpdatedAt = remote.UpdatedAt
+	entry.RemoteAhead = false
+	entry.LastError = ""
+	entry.PendingSync = false
+	entry.PendingPercent = 0
+	entry.RetryCount = 0
+	entry.NextRetryAt = time.Time{}
+	_ = a.state.Put(bookKey, entry)
+	return true
 }
 
 func (a *App) syncFailure(bookKey string, err error) {
@@ -295,7 +348,7 @@ func (a *App) reconcile() {
 			continue
 		}
 
-		remote, updated, err := a.backend.Pull(id)
+		remote, err := a.pullBackendState(id)
 		if err != nil {
 			if temporary(err) {
 				a.backendFailure("offline", err.Error())
@@ -308,14 +361,17 @@ func (a *App) reconcile() {
 		}
 		a.backendSuccess()
 		entry.LastError = ""
-		if remote > entry.Percent+0.01 {
-			entry.BackendPercent = remote
-			entry.BackendUpdatedAt = updated
-			entry.RemoteAhead = entry.SuppressRemoteUntilPct+0.01 < remote
+		if remote.Percent > entry.Percent+0.01 {
+			if a.applyRemoteExact(key, entry, remote) {
+				continue
+			}
+			entry.BackendPercent = remote.Percent
+			entry.BackendUpdatedAt = remote.UpdatedAt
+			entry.RemoteAhead = entry.SuppressRemoteUntilPct+0.01 < remote.Percent
 		} else {
 			entry.RemoteAhead = false
-			entry.BackendPercent = remote
-			entry.BackendUpdatedAt = updated
+			entry.BackendPercent = remote.Percent
+			entry.BackendUpdatedAt = remote.UpdatedAt
 		}
 		_ = a.state.Put(key, entry)
 	}
