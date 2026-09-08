@@ -243,7 +243,7 @@ The Shared Shelf is deliberately **single-source**. Choose exactly one canonical
 - `filesystem`: index and stream a read-only directory.
 - `off`: no MoonDav catalog.
 
-MoonDav never imports, copies, renames, converts, or modifies ebook files for the Shared Shelf. Remote acquisitions are streamed directly from the configured OPDS server to the reader. Filesystem acquisitions are opened read-only and streamed with HTTP range support.
+MoonDav never imports, copies, renames, converts, or modifies ebook files for the Shared Shelf. The Shared Shelf never copies ebook payloads into MoonDav storage. Remote acquisitions are streamed directly from the configured OPDS server to the reader. Filesystem acquisitions are opened read-only and streamed with HTTP range support.
 
 Moon+ still downloads a book locally onto each Android device when you open or acquire it. That client-side copy is required by Moon+ and is outside MoonDav. The server-side library remains single-copy.
 
