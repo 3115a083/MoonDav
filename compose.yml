@@ -8,7 +8,8 @@ services:
     ports:
       - "127.0.0.1:8765:8765"
     volumes:
-      - ./data:/data
+      - moondav-data:/data
+      - ./config:/config:ro
     read_only: true
     tmpfs:
       - /tmp:size=8m,mode=1777
@@ -19,3 +20,6 @@ services:
     user: "65532:65532"
     pids_limit: 128
     mem_limit: 128m
+
+volumes:
+  moondav-data:
