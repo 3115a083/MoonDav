@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 )
 
 type Config struct {
@@ -25,26 +26,55 @@ type Config struct {
 	BackendKey      string
 	BackendPassword string
 	BookMapFile     string
+
+	NotifyAfter       time.Duration
+	NotifyRepeat      time.Duration
+	TelegramBotToken  string
+	TelegramChatID    string
+	WebhookURL        string
+	WebhookBearer     string
+	SMTPHost          string
+	SMTPPort          int
+	SMTPUser          string
+	SMTPPassword      string
+	SMTPFrom          string
+	SMTPTo            string
+	SMTPTLSMode       string
 }
 
 func LoadConfigFromEnv() (Config, error) {
+	dataDir := env("MOONDAV_DATA_DIR", "/data")
 	c := Config{
 		Listen:          env("MOONDAV_LISTEN", ":8765"),
-		DataDir:         env("MOONDAV_DATA_DIR", "/data"),
-		DAVUser:         os.Getenv("MOONDAV_DAV_USER"),
-		DAVPassword:     os.Getenv("MOONDAV_DAV_PASSWORD"),
-		AdminUser:       os.Getenv("MOONDAV_ADMIN_USER"),
-		AdminPassword:   os.Getenv("MOONDAV_ADMIN_PASSWORD"),
+		DataDir:         dataDir,
+		DAVUser:         secretEnv("MOONDAV_DAV_USER"),
+		DAVPassword:     secretEnv("MOONDAV_DAV_PASSWORD"),
+		AdminUser:       secretEnv("MOONDAV_ADMIN_USER"),
+		AdminPassword:   secretEnv("MOONDAV_ADMIN_PASSWORD"),
 		BasePath:        cleanBasePath(env("MOONDAV_BASE_PATH", "/dav/")),
 		MaxUploadBytes:  envInt64("MOONDAV_MAX_UPLOAD_BYTES", 8<<20),
 		ConflictPolicy:  strings.ToLower(env("MOONDAV_CONFLICT_POLICY", "furthest")),
 		BackendType:     strings.ToLower(env("MOONDAV_BACKEND", "none")),
-		BackendURL:      strings.TrimRight(os.Getenv("MOONDAV_BACKEND_URL"), "/"),
-		BackendToken:    os.Getenv("MOONDAV_BACKEND_TOKEN"),
-		BackendUser:     os.Getenv("MOONDAV_BACKEND_USER"),
-		BackendKey:      os.Getenv("MOONDAV_BACKEND_KEY"),
-		BackendPassword: os.Getenv("MOONDAV_BACKEND_PASSWORD"),
-		BookMapFile:     env("MOONDAV_BOOK_MAP_FILE", filepath.Join(env("MOONDAV_DATA_DIR", "/data"), "book-map.json")),
+		BackendURL:      strings.TrimRight(env("MOONDAV_BACKEND_URL", ""), "/"),
+		BackendToken:    secretEnv("MOONDAV_BACKEND_TOKEN"),
+		BackendUser:     secretEnv("MOONDAV_BACKEND_USER"),
+		BackendKey:      secretEnv("MOONDAV_BACKEND_KEY"),
+		BackendPassword: secretEnv("MOONDAV_BACKEND_PASSWORD"),
+		BookMapFile:     env("MOONDAV_BOOK_MAP_FILE", filepath.Join(dataDir, "book-map.json")),
+
+		NotifyAfter:      envDuration("MOONDAV_NOTIFY_AFTER", 10*time.Minute),
+		NotifyRepeat:     envDuration("MOONDAV_NOTIFY_REPEAT", 6*time.Hour),
+		TelegramBotToken: secretEnv("MOONDAV_TELEGRAM_BOT_TOKEN"),
+		TelegramChatID:   env("MOONDAV_TELEGRAM_CHAT_ID", ""),
+		WebhookURL:       env("MOONDAV_WEBHOOK_URL", ""),
+		WebhookBearer:    secretEnv("MOONDAV_WEBHOOK_BEARER"),
+		SMTPHost:         env("MOONDAV_SMTP_HOST", ""),
+		SMTPPort:         int(envInt64("MOONDAV_SMTP_PORT", 587)),
+		SMTPUser:         secretEnv("MOONDAV_SMTP_USER"),
+		SMTPPassword:     secretEnv("MOONDAV_SMTP_PASSWORD"),
+		SMTPFrom:         env("MOONDAV_SMTP_FROM", ""),
+		SMTPTo:           env("MOONDAV_SMTP_TO", ""),
+		SMTPTLSMode:      strings.ToLower(env("MOONDAV_SMTP_TLS", "starttls")),
 	}
 	if c.DAVUser == "" || c.DAVPassword == "" {
 		return c, errors.New("MOONDAV_DAV_USER and MOONDAV_DAV_PASSWORD are required")
@@ -55,10 +85,22 @@ func LoadConfigFromEnv() (Config, error) {
 	if c.ConflictPolicy != "furthest" && c.ConflictPolicy != "latest" {
 		return c, errors.New("MOONDAV_CONFLICT_POLICY must be furthest or latest")
 	}
+	if c.SMTPTLSMode != "starttls" && c.SMTPTLSMode != "tls" {
+		return c, errors.New("MOONDAV_SMTP_TLS must be starttls or tls")
+	}
 	if err := os.MkdirAll(filepath.Join(c.DataDir, "webdav"), 0700); err != nil {
 		return c, err
 	}
 	return c, nil
+}
+
+func secretEnv(k string) string {
+	if file := os.Getenv(k + "_FILE"); file != "" {
+		if b, err := os.ReadFile(file); err == nil {
+			return strings.TrimSpace(string(b))
+		}
+	}
+	return os.Getenv(k)
 }
 
 func env(k, d string) string {
@@ -71,6 +113,15 @@ func env(k, d string) string {
 func envInt64(k string, d int64) int64 {
 	if v := os.Getenv(k); v != "" {
 		if n, err := strconv.ParseInt(v, 10, 64); err == nil {
+			return n
+		}
+	}
+	return d
+}
+
+func envDuration(k string, d time.Duration) time.Duration {
+	if v := os.Getenv(k); v != "" {
+		if n, err := time.ParseDuration(v); err == nil {
 			return n
 		}
 	}
