@@ -4,7 +4,6 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"io"
-	"log"
 	"net/http"
 	"path/filepath"
 	"strings"
