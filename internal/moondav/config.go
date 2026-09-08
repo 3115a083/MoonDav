@@ -26,6 +26,8 @@ type Config struct {
 	BackendKey      string
 	BackendPassword string
 	BookMapFile     string
+	LibraryRoot     string
+	ExactPositions  bool
 
 	NotifyAfter       time.Duration
 	NotifyRepeat      time.Duration
@@ -61,6 +63,8 @@ func LoadConfigFromEnv() (Config, error) {
 		BackendKey:      secretEnv("MOONDAV_BACKEND_KEY"),
 		BackendPassword: secretEnv("MOONDAV_BACKEND_PASSWORD"),
 		BookMapFile:     env("MOONDAV_BOOK_MAP_FILE", filepath.Join(dataDir, "book-map.json")),
+		LibraryRoot:     env("MOONDAV_LIBRARY_ROOT", ""),
+		ExactPositions:  envBool("MOONDAV_EXACT_POSITIONS", false),
 
 		NotifyAfter:      envDuration("MOONDAV_NOTIFY_AFTER", 10*time.Minute),
 		NotifyRepeat:     envDuration("MOONDAV_NOTIFY_REPEAT", 6*time.Hour),
@@ -114,6 +118,18 @@ func envInt64(k string, d int64) int64 {
 	if v := os.Getenv(k); v != "" {
 		if n, err := strconv.ParseInt(v, 10, 64); err == nil {
 			return n
+		}
+	}
+	return d
+}
+
+func envBool(k string, d bool) bool {
+	if v := strings.TrimSpace(os.Getenv(k)); v != "" {
+		switch strings.ToLower(v) {
+		case "1", "true", "yes", "on":
+			return true
+		case "0", "false", "no", "off":
+			return false
 		}
 	}
 	return d
