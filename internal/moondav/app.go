@@ -52,27 +52,35 @@ func (a *App) Handler() http.Handler {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = io.WriteString(w, `{"status":"ok"}`)
 	})
-	mux.HandleFunc("/", a.auth(a.uiIndex))
-	mux.Handle("/assets/", a.authHandler(a.uiAssets()))
-	mux.HandleFunc("/api/dashboard", a.auth(a.apiDashboard))
-	mux.HandleFunc("/api/mappings", a.auth(a.apiMappings))
-	mux.HandleFunc("/api/conflicts", a.auth(a.apiConflicts))
-	mux.HandleFunc("/status", a.auth(a.status))
-	mux.Handle(a.cfg.BasePath, a.auth(a.davHandler()))
+	mux.HandleFunc("/", a.adminAuth(a.uiIndex))
+	mux.Handle("/assets/", a.adminAuthHandler(a.uiAssets()))
+	mux.HandleFunc("/api/dashboard", a.adminAuth(a.apiDashboard))
+	mux.HandleFunc("/api/mappings", a.adminAuth(a.apiMappings))
+	mux.HandleFunc("/api/conflicts", a.adminAuth(a.apiConflicts))
+	mux.HandleFunc("/status", a.adminAuth(a.status))
+	mux.Handle(a.cfg.BasePath, a.davAuth(a.davHandler()))
 	return secureHeaders(mux)
 }
 
-func (a *App) authHandler(next http.Handler) http.Handler {
-	return http.HandlerFunc(a.auth(next.ServeHTTP))
+func (a *App) adminAuthHandler(next http.Handler) http.Handler {
+	return http.HandlerFunc(a.basicAuth(next.ServeHTTP, a.cfg.AdminUser, a.cfg.AdminPassword, "MoonDav Admin"))
 }
 
-func (a *App) auth(next http.HandlerFunc) http.HandlerFunc {
+func (a *App) adminAuth(next http.HandlerFunc) http.HandlerFunc {
+	return a.basicAuth(next, a.cfg.AdminUser, a.cfg.AdminPassword, "MoonDav Admin")
+}
+
+func (a *App) davAuth(next http.HandlerFunc) http.HandlerFunc {
+	return a.basicAuth(next, a.cfg.DAVUser, a.cfg.DAVPassword, "MoonDav WebDAV")
+}
+
+func (a *App) basicAuth(next http.HandlerFunc, user, pass, realm string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		u, p, ok := r.BasicAuth()
 		if !ok ||
-			subtle.ConstantTimeCompare([]byte(u), []byte(a.cfg.DAVUser)) != 1 ||
-			subtle.ConstantTimeCompare([]byte(p), []byte(a.cfg.DAVPassword)) != 1 {
-			w.Header().Set("WWW-Authenticate", `Basic realm="MoonDav"`)
+			subtle.ConstantTimeCompare([]byte(u), []byte(user)) != 1 ||
+			subtle.ConstantTimeCompare([]byte(p), []byte(pass)) != 1 {
+			w.Header().Set("WWW-Authenticate", `Basic realm="`+realm+`"`)
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
