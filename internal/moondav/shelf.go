@@ -15,6 +15,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -27,6 +28,13 @@ type shelfFile struct {
 	ModTime time.Time
 	MIME    string
 	ID      string
+}
+
+type shelfIndex struct {
+	mu    sync.Mutex
+	root  string
+	at    time.Time
+	files []shelfFile
 }
 
 func (a *App) shelfHandler() http.HandlerFunc {
@@ -264,6 +272,11 @@ func (a *App) scanShelfFiles() ([]shelfFile, error) {
 	if err != nil {
 		return nil, err
 	}
+	a.shelfIndex.mu.Lock()
+	defer a.shelfIndex.mu.Unlock()
+	if a.shelfIndex.root == root && time.Since(a.shelfIndex.at) < 30*time.Second {
+		return append([]shelfFile(nil), a.shelfIndex.files...), nil
+	}
 	var out []shelfFile
 	err = filepath.WalkDir(root, func(full string, d os.DirEntry, walkErr error) error {
 		if walkErr != nil {
@@ -315,7 +328,10 @@ func (a *App) scanShelfFiles() ([]shelfFile, error) {
 	sort.Slice(out, func(i, j int) bool {
 		return strings.ToLower(out[i].Title) < strings.ToLower(out[j].Title)
 	})
-	return out, nil
+	a.shelfIndex.root = root
+	a.shelfIndex.at = time.Now()
+	a.shelfIndex.files = append([]shelfFile(nil), out...)
+	return append([]shelfFile(nil), out...), nil
 }
 
 func (a *App) serveShelfFile(w http.ResponseWriter, r *http.Request) {
