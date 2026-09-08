@@ -43,7 +43,8 @@ services:
     ports:
       - "127.0.0.1:8765:8765"
     volumes:
-      - ./data:/data
+      - moondav-data:/data
+      - ./config:/config:ro
     read_only: true
     tmpfs:
       - /tmp:size=8m,mode=1777
@@ -54,6 +55,9 @@ services:
     user: "65532:65532"
     pids_limit: 128
     mem_limit: 128m
+
+volumes:
+  moondav-data:
 ```
 
 Create `.env`:
@@ -67,7 +71,8 @@ MOONDAV_BACKEND=none
 Start the service:
 
 ```bash
-mkdir -p data
+mkdir -p config
+cp book-map.example.json config/book-map.json
 docker compose up -d
 ```
 
@@ -104,7 +109,7 @@ This protects against the most common stale-device failure mode. It also means a
 
 Moon+ identifies cache entries by filename. Calibre-Web identifies books by Calibre UUID. KOReader-compatible backends use a document identifier. MoonDav therefore uses an explicit mapping file.
 
-Create `data/book-map.json`:
+Create `config/book-map.json`:
 
 ```json
 {
@@ -134,7 +139,7 @@ Calibre-Web exposes a Kobo-compatible reading-state API with progress, status, t
 3. Create or view the **Kobo Sync Token**.
 4. Copy the token from a URL shaped like `https://calibre.example/kobo/TOKEN`.
 5. Make sure that user can access the mapped books.
-6. Add Calibre UUIDs to `data/book-map.json`.
+6. Add Calibre UUIDs to `config/book-map.json`.
 
 Configure MoonDav:
 
@@ -166,7 +171,7 @@ BookLore exposes a KOReader-compatible sync endpoint and supports progress synch
 2. Enable KOReader Sync.
 3. Create the KOReader username and password.
 4. Copy the KOReader API path, normally similar to `https://booklore.example/api/koreader`.
-5. Add the corresponding KOReader document IDs to `data/book-map.json`.
+5. Add the corresponding KOReader document IDs to `config/book-map.json`.
 
 Configure MoonDav:
 
@@ -268,7 +273,7 @@ If every Moon+ device can run Tailscale, this is simpler than a public reverse p
 | `MOONDAV_BACKEND_USER` | empty | BookLore/KOReader username |
 | `MOONDAV_BACKEND_PASSWORD` | empty | BookLore/KOReader password |
 | `MOONDAV_BACKEND_KEY` | empty | Precomputed KOReader key |
-| `MOONDAV_BOOK_MAP_FILE` | `/data/book-map.json` | Mapping file |
+| `MOONDAV_BOOK_MAP_FILE` | `/config/book-map.json` | Mapping file |
 
 ## Health and status
 
@@ -288,14 +293,7 @@ curl -u moon:password https://moon.example.net/status
 
 ## Data and backup
 
-Back up the full `data/` directory:
-
-```text
-data/
-├── webdav/
-├── state.json
-└── book-map.json
-```
+Back up the Docker volume `moondav-data` and the local `config/` directory. Runtime state in the volume contains `webdav/` and `state.json`; backend mappings live in `config/book-map.json`.
 
 `state.json` is updated through a temporary file and atomic rename. The original `.po` remains the exact Moon+ resume-position source of truth.
 
@@ -305,7 +303,7 @@ The provided image and Compose use:
 
 - non-root UID/GID `65532`
 - read-only container root filesystem
-- writable `/data` only
+- writable `/data` named volume only, plus read-only `/config`
 - all Linux capabilities dropped
 - `no-new-privileges`
 - no Docker socket
