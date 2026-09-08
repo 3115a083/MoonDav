@@ -30,3 +30,16 @@ Do not add the Docker socket, host networking, privileged mode, or broad host fi
 ## Secrets
 
 Use long random values. Never commit `.env`. Rotate a credential if it appears in logs, shell history, screenshots, or a public repository.
+
+
+## Shared Shelf
+
+The Shared Shelf is read-only by design. MoonDav accepts only GET and HEAD on /opds paths.
+
+For OPDS proxy mode, the upstream target is constrained to the configured scheme and host. Rewritten links cannot turn MoonDav into a general-purpose cross-origin proxy.
+
+For filesystem mode, mount the canonical ebook directory read-only. MoonDav rejects absolute paths, parent traversal, symbolic links, directories, and unsupported file types.
+
+MoonDav does not cache ebook payloads in /data. Remote and filesystem acquisitions are streamed directly to the requesting reader. Only OPDS XML metadata is buffered in memory and is bounded by MOONDAV_SHELF_MAX_FEED_BYTES.
+
+Use separate upstream OPDS credentials through environment variables or *_FILE secret paths. These credentials are never exposed in the dashboard or to Moon+.

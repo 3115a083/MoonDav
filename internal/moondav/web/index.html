@@ -16,6 +16,7 @@
       </div>
       <div class="top-actions">
         <span id="backendBadge" class="pill">loading</span>
+        <span id="shelfBadge" class="pill">shelf off</span>
         <button id="refresh" class="icon-button" type="button" aria-label="Refresh">↻</button>
       </div>
     </header>
@@ -76,7 +77,8 @@
       </div>
       <div class="book-actions">
         <div class="mapping-row">
-          <input class="mapping-input" type="text" placeholder="Backend book ID" spellcheck="false">
+          <input class="mapping-input backend-input" type="text" placeholder="Backend book ID" spellcheck="false">
+          <input class="mapping-input epub-input" type="text" placeholder="EPUB path for exact sync" spellcheck="false">
           <button class="save-map button secondary-button" type="button">Save mapping</button>
         </div>
         <div class="conflict-actions hidden">
