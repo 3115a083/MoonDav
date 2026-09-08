@@ -11,6 +11,7 @@ import (
 type dashboardBook struct {
 	Key            string    `json:"key"`
 	BackendID      string    `json:"backend_id,omitempty"`
+	EPUBPath       string    `json:"epub_path,omitempty"`
 	MoonPercent    float64   `json:"moon_percent"`
 	BackendPercent float64   `json:"backend_percent"`
 	UpdatedAt      time.Time `json:"updated_at"`
@@ -29,7 +30,7 @@ func (a *App) apiDashboard(w http.ResponseWriter, r *http.Request) {
 	books := make([]dashboardBook, 0, len(states))
 	var conflicts, unmapped, errors, queued int
 	for key, e := range states {
-		id, mapped := maps[key]
+		mapping, mapped := maps[key]
 		status := "synced"
 		switch {
 		case e.LastError != "":
@@ -50,13 +51,14 @@ func (a *App) apiDashboard(w http.ResponseWriter, r *http.Request) {
 			status = "remote-ahead"
 		}
 		books = append(books, dashboardBook{
-			Key: key, BackendID: id, MoonPercent: e.Percent, BackendPercent: e.BackendPercent,
+			Key: key, BackendID: mapping.BackendID, EPUBPath: mapping.EPUBPath, MoonPercent: e.Percent, BackendPercent: e.BackendPercent,
 			UpdatedAt: e.UpdatedAt, BackendUpdated: e.BackendUpdatedAt, Status: status, Error: e.LastError,
 		})
 	}
 	sort.Slice(books, func(i, j int) bool { return books[i].UpdatedAt.After(books[j].UpdatedAt) })
 	writeJSON(w, map[string]any{
 		"backend": a.cfg.BackendType,
+		"shelf_mode": a.cfg.ShelfMode,
 		"books": books,
 		"summary": map[string]int{"books": len(books), "conflicts": conflicts, "unmapped": unmapped, "errors": errors, "queued": queued},
 		"backend_health": a.state.Health(),
@@ -77,12 +79,13 @@ func (a *App) apiMappings(w http.ResponseWriter, r *http.Request) {
 		var v struct {
 			BookKey   string `json:"book_key"`
 			BackendID string `json:"backend_id"`
+			EPUBPath  string `json:"epub_path"`
 		}
 		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<10)).Decode(&v); err != nil {
 			http.Error(w, "invalid json", http.StatusBadRequest)
 			return
 		}
-		if err := a.bookMap.Set(v.BookKey, v.BackendID); err != nil {
+		if err := a.bookMap.SetDetailed(v.BookKey, BookMapping{BackendID: v.BackendID, EPUBPath: v.EPUBPath}); err != nil {
 			http.Error(w, "invalid mapping", http.StatusBadRequest)
 			return
 		}
