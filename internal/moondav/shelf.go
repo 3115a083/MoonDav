@@ -18,7 +18,7 @@ import (
 	"time"
 )
 
-var shelfLinkRE = regexp.MustCompile(`(?i)(href|template)s*=s*"([^"]+)"`)
+var shelfLinkRE = regexp.MustCompile(`(?i)(href|template)\s*=\s*"([^"]+)"`)
 
 type shelfFile struct {
 	Rel     string
@@ -66,7 +66,12 @@ func (a *App) proxyOPDS(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	req.Header.Set("User-Agent", "MoonDav/OPDS")
-	resp, err := (&http.Client{Timeout: 60 * time.Second}).Do(req)
+	client := &http.Client{Transport: &http.Transport{
+		Proxy: http.ProxyFromEnvironment,
+		ResponseHeaderTimeout: 15 * time.Second,
+		IdleConnTimeout: 90 * time.Second,
+	}}
+	resp, err := client.Do(req)
 	if err != nil {
 		http.Error(w, "shelf source unavailable", http.StatusBadGateway)
 		return
@@ -219,9 +224,9 @@ func (a *App) filesystemOPDS(w http.ResponseWriter, r *http.Request) {
 	b.WriteString("<updated>" + time.Now().UTC().Format(time.RFC3339) + "</updated>")
 	b.WriteString(`<link rel="self" href="/opds/" type="application/atom+xml;profile=opds-catalog;kind=acquisition"/>`)
 	if end < len(files) {
-		next := fmt.Sprintf("/opds/?page=%d&amp;size=%d", page+1, size)
+		next := fmt.Sprintf("/opds/?page=%d&size=%d", page+1, size)
 		if q != "" {
-			next += "&amp;q=" + url.QueryEscape(q)
+			next += "&q=" + url.QueryEscape(q)
 		}
 		b.WriteString(`<link rel="next" href="` + xmlEscape(next) + `" type="application/atom+xml;profile=opds-catalog;kind=acquisition"/>`)
 	}
