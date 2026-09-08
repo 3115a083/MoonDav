@@ -58,6 +58,7 @@ func (a *App) apiDashboard(w http.ResponseWriter, r *http.Request) {
 	sort.Slice(books, func(i, j int) bool { return books[i].UpdatedAt.After(books[j].UpdatedAt) })
 	writeJSON(w, map[string]any{
 		"backend": a.cfg.BackendType,
+		"shelf_mode": a.cfg.ShelfMode,
 		"books": books,
 		"summary": map[string]int{"books": len(books), "conflicts": conflicts, "unmapped": unmapped, "errors": errors, "queued": queued},
 		"backend_health": a.state.Health(),
