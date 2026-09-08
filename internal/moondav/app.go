@@ -53,14 +53,17 @@ func (a *App) Handler() http.Handler {
 		_, _ = io.WriteString(w, `{"status":"ok"}`)
 	})
 	mux.HandleFunc("/", a.auth(a.uiIndex))
-	mux.HandleFunc("/assets/app.css", a.auth(a.uiCSS))
-	mux.HandleFunc("/assets/app.js", a.auth(a.uiJS))
+	mux.Handle("/assets/", a.authHandler(a.uiAssets()))
 	mux.HandleFunc("/api/dashboard", a.auth(a.apiDashboard))
 	mux.HandleFunc("/api/mappings", a.auth(a.apiMappings))
 	mux.HandleFunc("/api/conflicts", a.auth(a.apiConflicts))
 	mux.HandleFunc("/status", a.auth(a.status))
 	mux.Handle(a.cfg.BasePath, a.auth(a.davHandler()))
 	return secureHeaders(mux)
+}
+
+func (a *App) authHandler(next http.Handler) http.Handler {
+	return http.HandlerFunc(a.auth(next.ServeHTTP))
 }
 
 func (a *App) auth(next http.HandlerFunc) http.HandlerFunc {
