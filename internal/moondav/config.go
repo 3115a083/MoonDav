@@ -28,6 +28,12 @@ type Config struct {
 	BookMapFile     string
 	LibraryRoot     string
 	ExactPositions  bool
+	ShelfMode       string
+	ShelfURL        string
+	ShelfUser       string
+	ShelfPassword   string
+	ShelfRoot       string
+	ShelfMaxFeedBytes int64
 
 	NotifyAfter       time.Duration
 	NotifyRepeat      time.Duration
@@ -65,6 +71,12 @@ func LoadConfigFromEnv() (Config, error) {
 		BookMapFile:     env("MOONDAV_BOOK_MAP_FILE", filepath.Join(dataDir, "book-map.json")),
 		LibraryRoot:     env("MOONDAV_LIBRARY_ROOT", ""),
 		ExactPositions:  envBool("MOONDAV_EXACT_POSITIONS", false),
+		ShelfMode:       strings.ToLower(env("MOONDAV_SHELF_MODE", "off")),
+		ShelfURL:        strings.TrimRight(env("MOONDAV_SHELF_URL", ""), "/"),
+		ShelfUser:       secretEnv("MOONDAV_SHELF_USER"),
+		ShelfPassword:   secretEnv("MOONDAV_SHELF_PASSWORD"),
+		ShelfRoot:       env("MOONDAV_SHELF_ROOT", ""),
+		ShelfMaxFeedBytes: envInt64("MOONDAV_SHELF_MAX_FEED_BYTES", 8<<20),
 
 		NotifyAfter:      envDuration("MOONDAV_NOTIFY_AFTER", 10*time.Minute),
 		NotifyRepeat:     envDuration("MOONDAV_NOTIFY_REPEAT", 6*time.Hour),
@@ -91,6 +103,19 @@ func LoadConfigFromEnv() (Config, error) {
 	}
 	if c.SMTPTLSMode != "starttls" && c.SMTPTLSMode != "tls" {
 		return c, errors.New("MOONDAV_SMTP_TLS must be starttls or tls")
+	}
+	switch c.ShelfMode {
+	case "off":
+	case "opds":
+		if c.ShelfURL == "" {
+			return c, errors.New("MOONDAV_SHELF_URL is required when MOONDAV_SHELF_MODE=opds")
+		}
+	case "filesystem":
+		if c.ShelfRoot == "" {
+			return c, errors.New("MOONDAV_SHELF_ROOT is required when MOONDAV_SHELF_MODE=filesystem")
+		}
+	default:
+		return c, errors.New("MOONDAV_SHELF_MODE must be off, opds, or filesystem")
 	}
 	if err := os.MkdirAll(filepath.Join(c.DataDir, "webdav"), 0700); err != nil {
 		return c, err
