@@ -73,7 +73,7 @@ func LoadConfigFromEnv() (Config, error) {
 		WebhookURL:       env("MOONDAV_WEBHOOK_URL", ""),
 		WebhookBearer:    secretEnv("MOONDAV_WEBHOOK_BEARER"),
 		SMTPHost:         env("MOONDAV_SMTP_HOST", ""),
-		SMTPPort:         int(envInt64("MOONDAV_SMTP_PORT", 587)),
+		SMTPPort:         envInt("MOONDAV_SMTP_PORT", 587),
 		SMTPUser:         secretEnv("MOONDAV_SMTP_USER"),
 		SMTPPassword:     secretEnv("MOONDAV_SMTP_PASSWORD"),
 		SMTPFrom:         env("MOONDAV_SMTP_FROM", ""),
@@ -110,6 +110,15 @@ func secretEnv(k string) string {
 func env(k, d string) string {
 	if v := os.Getenv(k); v != "" {
 		return v
+	}
+	return d
+}
+
+func envInt(k string, d int) int {
+	if v := os.Getenv(k); v != "" {
+		if n, err := strconv.ParseUint(v, 10, 16); err == nil && n <= 65535 {
+			return int(n)
+		}
 	}
 	return d
 }
