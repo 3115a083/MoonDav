@@ -2,6 +2,7 @@ package moondav
 
 import (
 	"errors"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -109,6 +110,13 @@ func LoadConfigFromEnv() (Config, error) {
 	case "opds":
 		if c.ShelfURL == "" {
 			return c, errors.New("MOONDAV_SHELF_URL is required when MOONDAV_SHELF_MODE=opds")
+		}
+		u, err := url.Parse(c.ShelfURL)
+		if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") || u.User != nil {
+			return c, errors.New("MOONDAV_SHELF_URL must be an http(s) URL without embedded credentials")
+		}
+		if c.ShelfMaxFeedBytes < 1024 {
+			return c, errors.New("MOONDAV_SHELF_MAX_FEED_BYTES must be at least 1024")
 		}
 	case "filesystem":
 		if c.ShelfRoot == "" {
