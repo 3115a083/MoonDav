@@ -2,6 +2,7 @@ package moondav
 
 import (
 	"errors"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -26,6 +27,14 @@ type Config struct {
 	BackendKey      string
 	BackendPassword string
 	BookMapFile     string
+	LibraryRoot     string
+	ExactPositions  bool
+	ShelfMode       string
+	ShelfURL        string
+	ShelfUser       string
+	ShelfPassword   string
+	ShelfRoot       string
+	ShelfMaxFeedBytes int64
 
 	NotifyAfter       time.Duration
 	NotifyRepeat      time.Duration
@@ -61,6 +70,14 @@ func LoadConfigFromEnv() (Config, error) {
 		BackendKey:      secretEnv("MOONDAV_BACKEND_KEY"),
 		BackendPassword: secretEnv("MOONDAV_BACKEND_PASSWORD"),
 		BookMapFile:     env("MOONDAV_BOOK_MAP_FILE", filepath.Join(dataDir, "book-map.json")),
+		LibraryRoot:     env("MOONDAV_LIBRARY_ROOT", ""),
+		ExactPositions:  envBool("MOONDAV_EXACT_POSITIONS", false),
+		ShelfMode:       strings.ToLower(env("MOONDAV_SHELF_MODE", "off")),
+		ShelfURL:        strings.TrimRight(env("MOONDAV_SHELF_URL", ""), "/"),
+		ShelfUser:       secretEnv("MOONDAV_SHELF_USER"),
+		ShelfPassword:   secretEnv("MOONDAV_SHELF_PASSWORD"),
+		ShelfRoot:       env("MOONDAV_SHELF_ROOT", ""),
+		ShelfMaxFeedBytes: envInt64("MOONDAV_SHELF_MAX_FEED_BYTES", 8<<20),
 
 		NotifyAfter:      envDuration("MOONDAV_NOTIFY_AFTER", 10*time.Minute),
 		NotifyRepeat:     envDuration("MOONDAV_NOTIFY_REPEAT", 6*time.Hour),
@@ -87,6 +104,26 @@ func LoadConfigFromEnv() (Config, error) {
 	}
 	if c.SMTPTLSMode != "starttls" && c.SMTPTLSMode != "tls" {
 		return c, errors.New("MOONDAV_SMTP_TLS must be starttls or tls")
+	}
+	switch c.ShelfMode {
+	case "off":
+	case "opds":
+		if c.ShelfURL == "" {
+			return c, errors.New("MOONDAV_SHELF_URL is required when MOONDAV_SHELF_MODE=opds")
+		}
+		u, err := url.Parse(c.ShelfURL)
+		if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") || u.User != nil {
+			return c, errors.New("MOONDAV_SHELF_URL must be an http(s) URL without embedded credentials")
+		}
+		if c.ShelfMaxFeedBytes < 1024 {
+			return c, errors.New("MOONDAV_SHELF_MAX_FEED_BYTES must be at least 1024")
+		}
+	case "filesystem":
+		if c.ShelfRoot == "" {
+			return c, errors.New("MOONDAV_SHELF_ROOT is required when MOONDAV_SHELF_MODE=filesystem")
+		}
+	default:
+		return c, errors.New("MOONDAV_SHELF_MODE must be off, opds, or filesystem")
 	}
 	if err := os.MkdirAll(filepath.Join(c.DataDir, "webdav"), 0700); err != nil {
 		return c, err
@@ -123,6 +160,18 @@ func envInt64(k string, d int64) int64 {
 	if v := os.Getenv(k); v != "" {
 		if n, err := strconv.ParseInt(v, 10, 64); err == nil {
 			return n
+		}
+	}
+	return d
+}
+
+func envBool(k string, d bool) bool {
+	if v := strings.TrimSpace(os.Getenv(k)); v != "" {
+		switch strings.ToLower(v) {
+		case "1", "true", "yes", "on":
+			return true
+		case "0", "false", "no", "off":
+			return false
 		}
 	}
 	return d

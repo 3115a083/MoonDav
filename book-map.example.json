@@ -1,5 +1,8 @@
 {
   "entries": {
-    "the necromancers house - buehlman christopher.epub": "BACKEND_BOOK_ID"
+    "the necromancers house - buehlman christopher.epub": {
+      "backend_id": "CALIBRE_BOOK_UUID",
+      "epub_path": "Christopher Buehlman/The Necromancer's House (123)/The Necromancer's House - Christopher Buehlman.epub"
+    }
   }
 }
