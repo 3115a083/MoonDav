@@ -45,7 +45,7 @@ button,input{font:inherit}button{cursor:pointer}.shell{width:min(1160px,calc(100
 .progress-label strong{color:var(--soft);font-weight:600}.track{height:7px;background:#252e37;border-radius:999px;overflow:hidden;margin-top:9px}
 .track span{display:block;height:100%;border-radius:inherit;background:var(--accent);width:0;transition:width .3s ease}.track.secondary span{background:#8f9aa6}
 .book-actions{display:flex;flex-direction:column;justify-content:center;gap:12px;border-left:1px solid var(--line);padding-left:28px}
-.mapping-row{display:flex;gap:8px}.mapping-input{min-width:0;flex:1}.button{border-radius:12px;padding:10px 12px;border:1px solid var(--line);font-size:12px;font-weight:650}
+.mapping-row{display:grid;gap:8px}.mapping-input{min-width:0;flex:1}.button{border-radius:12px;padding:10px 12px;border:1px solid var(--line);font-size:12px;font-weight:650}
 .primary-button{background:var(--accent);color:#121710;border-color:var(--accent)}.secondary-button{background:#202831;color:var(--text)}
 .ghost-button{background:transparent;color:var(--soft)}.button:hover{filter:brightness(1.06)}.conflict-actions{display:flex;gap:8px;flex-wrap:wrap}
 .error-line{color:var(--danger);font-size:12px;margin:14px 0 0}.notice{margin:0 0 12px;border:1px solid var(--line);border-radius:14px;padding:12px 14px;background:#171f28;color:var(--soft);font-size:13px}
