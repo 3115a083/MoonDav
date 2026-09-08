@@ -133,6 +133,8 @@
       const health = data.backend_health?.state || 'unknown';
       document.querySelector('#backendBadge').textContent =
         data.backend === 'none' ? 'WebDAV only' : data.backend + ' · ' + health;
+      document.querySelector('#shelfBadge').textContent =
+        data.shelf_mode === 'off' ? 'shelf off' : 'shelf · ' + data.shelf_mode;
       document.querySelector('#statBooks').textContent = data.summary.books;
       document.querySelector('#statConflicts').textContent = data.summary.conflicts;
       document.querySelector('#statUnmapped').textContent = data.summary.unmapped;
