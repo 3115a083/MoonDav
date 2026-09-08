@@ -3,6 +3,7 @@ package moondav
 import (
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 )
@@ -42,6 +43,40 @@ func (m *BookMap) Snapshot() map[string]string {
 func (m *BookMap) Resolve(key string) (string, bool) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	v, ok := m.Entries[strings.ToLower(key)]
+	v, ok := m.Entries[strings.ToLower(strings.TrimSpace(key))]
 	return v, ok
+}
+
+func (m *BookMap) Set(key, value string) error {
+	key = strings.ToLower(strings.TrimSpace(key))
+	value = strings.TrimSpace(value)
+	if key == "" || value == "" {
+		return os.ErrInvalid
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.Entries[key] = value
+	return m.saveLocked()
+}
+
+func (m *BookMap) Delete(key string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.Entries, strings.ToLower(strings.TrimSpace(key)))
+	return m.saveLocked()
+}
+
+func (m *BookMap) saveLocked() error {
+	if err := os.MkdirAll(filepath.Dir(m.path), 0700); err != nil {
+		return err
+	}
+	b, err := json.MarshalIndent(m, "", "  ")
+	if err != nil {
+		return err
+	}
+	tmp := m.path + ".tmp"
+	if err := os.WriteFile(tmp, b, 0600); err != nil {
+		return err
+	}
+	return os.Rename(tmp, m.path)
 }
