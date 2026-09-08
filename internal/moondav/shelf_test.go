@@ -32,8 +32,12 @@ func TestFilesystemShelfIsReadOnlyAndSupportsRange(t *testing.T) {
 		t.Fatalf("catalog does not contain acquisition entry: %s", rec.Body.String())
 	}
 
-	token := base64.RawURLEncoding.EncodeToString([]byte("Example.epub"))
-	req := httptest.NewRequest(http.MethodGet, "/opds/file?f="+token, nil)
+	files, err := app.scanShelfFiles()
+	if err != nil || len(files) != 1 {
+		t.Fatalf("expected one indexed shelf file: %+v %v", files, err)
+	}
+	token := base64.RawURLEncoding.EncodeToString([]byte(files[0].ID))
+	req := httptest.NewRequest(http.MethodGet, "/opds/file?id="+token, nil)
 	req.SetBasicAuth("moon", "dav-secret")
 	req.Header.Set("Range", "bytes=2-5")
 	out := httptest.NewRecorder()
@@ -45,7 +49,7 @@ func TestFilesystemShelfIsReadOnlyAndSupportsRange(t *testing.T) {
 		t.Fatalf("unexpected range body: %q", out.Body.String())
 	}
 
-	put := request(t, h, http.MethodPut, "/opds/file?f="+token, "damage", "moon", "dav-secret")
+	put := request(t, h, http.MethodPut, "/opds/file?id="+token, "damage", "moon", "dav-secret")
 	if put.Code != http.StatusMethodNotAllowed {
 		t.Fatalf("shelf must reject writes, got %d", put.Code)
 	}
