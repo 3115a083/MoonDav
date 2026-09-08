@@ -1,0 +1,24 @@
+services:
+  moondav:
+    image: ghcr.io/3115a083/moondav:beta
+    container_name: moondav
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "127.0.0.1:8765:8765"
+    volumes:
+      - moondav-data:/data
+    read_only: true
+    tmpfs:
+      - /tmp:size=8m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    user: "65532:65532"
+    pids_limit: 128
+    mem_limit: 128m
+
+volumes:
+  moondav-data:
