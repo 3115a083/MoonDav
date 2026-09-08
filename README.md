@@ -65,6 +65,8 @@ Create `.env`:
 ```dotenv
 MOONDAV_DAV_USER=moon
 MOONDAV_DAV_PASSWORD=replace-with-a-long-random-password
+MOONDAV_ADMIN_USER=admin
+MOONDAV_ADMIN_PASSWORD=replace-with-a-different-long-random-password
 MOONDAV_BACKEND=none
 ```
 
@@ -99,7 +101,7 @@ Open the MoonDav base URL in a browser, for example:
 https://moon.example.net/
 ```
 
-The dashboard uses the same HTTP Basic Auth credentials as WebDAV. It shows:
+The dashboard and JSON API use separate admin Basic Auth credentials. Moon+ only receives the WebDAV credentials. It shows:
 
 - Moon+ and backend progress side by side.
 - conflicts, unmapped books, and backend errors.
@@ -287,7 +289,9 @@ If every Moon+ device can run Tailscale, this is simpler than a public reverse p
 | `MOONDAV_DATA_DIR` | `/data` | Persistent state root |
 | `MOONDAV_BASE_PATH` | `/dav/` | WebDAV URL prefix |
 | `MOONDAV_DAV_USER` | required | Basic Auth username |
-| `MOONDAV_DAV_PASSWORD` | required | Basic Auth password |
+| `MOONDAV_DAV_PASSWORD` | required | WebDAV Basic Auth password |
+| `MOONDAV_ADMIN_USER` | required | Dashboard/API Basic Auth username |
+| `MOONDAV_ADMIN_PASSWORD` | required | Dashboard/API Basic Auth password |
 | `MOONDAV_MAX_UPLOAD_BYTES` | `8388608` | PUT size limit |
 | `MOONDAV_CONFLICT_POLICY` | `furthest` | `furthest` or `latest` |
 | `MOONDAV_BACKEND` | `none` | `none`, `calibre-web`, `booklore`, `kosync` |
