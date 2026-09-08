@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>MoonDav</title>
+  <link rel="stylesheet" href="/assets/app.css">
+</head>
+<body>
+  <main class="shell">
+    <header class="topbar">
+      <div class="brand">
+        <span class="moon" aria-hidden="true"></span>
+        <div><h1>MoonDav</h1><p>Reading state bridge</p></div>
+      </div>
+      <div class="top-actions">
+        <span id="backendBadge" class="pill">loading</span>
+        <button id="refresh" class="icon-button" type="button" aria-label="Refresh">↻</button>
+      </div>
+    </header>
+
+    <section class="hero">
+      <div>
+        <p class="eyebrow">SYNC OVERVIEW</p>
+        <h2>Your reading state, in one place.</h2>
+        <p class="lede">Moon+ positions stay exact. Backend progress stays visible. Conflicts remain explicit instead of being guessed away.</p>
+      </div>
+      <div class="hero-mark" aria-hidden="true"><span></span></div>
+    </section>
+
+    <section class="stats" aria-label="Sync summary">
+      <article><span>Books</span><strong id="statBooks">0</strong></article>
+      <article><span>Conflicts</span><strong id="statConflicts">0</strong></article>
+      <article><span>Unmapped</span><strong id="statUnmapped">0</strong></article>
+      <article><span>Errors</span><strong id="statErrors">0</strong></article>
+    </section>
+
+    <section class="section-head">
+      <div><p class="eyebrow">LIBRARY STATE</p><h3>Reading progress</h3></div>
+      <div class="filter-wrap">
+        <label class="sr-only" for="filter">Filter books</label>
+        <input id="filter" type="search" placeholder="Filter books…" autocomplete="off">
+      </div>
+    </section>
+
+    <section id="notice" class="notice hidden" role="status"></section>
+    <section id="bookList" class="book-list" aria-live="polite"></section>
+    <section id="empty" class="empty hidden">
+      <span class="empty-moon"></span>
+      <h3>No reading states yet</h3>
+      <p>Once Moon+ uploads a position file, the book will appear here.</p>
+    </section>
+
+    <footer><span>MoonDav</span><span>Private by design · WebDAV + backend bridge</span></footer>
+  </main>
+
+  <template id="bookTemplate">
+    <article class="book-card">
+      <div class="book-main">
+        <div class="book-title-row">
+          <div><h4 class="book-title"></h4><p class="book-meta"></p></div>
+          <span class="status-chip"></span>
+        </div>
+        <div class="progress-grid">
+          <div class="progress-block">
+            <div class="progress-label"><span>Moon+</span><strong class="moon-value"></strong></div>
+            <div class="track"><span class="moon-bar"></span></div>
+          </div>
+          <div class="progress-block">
+            <div class="progress-label"><span>Backend</span><strong class="backend-value"></strong></div>
+            <div class="track secondary"><span class="backend-bar"></span></div>
+          </div>
+        </div>
+        <p class="error-line hidden"></p>
+      </div>
+      <div class="book-actions">
+        <div class="mapping-row">
+          <input class="mapping-input" type="text" placeholder="Backend book ID" spellcheck="false">
+          <button class="save-map button secondary-button" type="button">Save mapping</button>
+        </div>
+        <div class="conflict-actions hidden">
+          <button class="keep-moon button primary-button" type="button">Keep Moon+ position</button>
+          <button class="ignore-remote button ghost-button" type="button">Ignore until caught up</button>
+        </div>
+      </div>
+    </article>
+  </template>
+  <script src="/assets/app.js"></script>
+</body>
+</html>
