@@ -127,11 +127,11 @@ func TestOPDSProxyRewritesAndStreamsWithoutCaching(t *testing.T) {
 		t.Fatalf("proxy catalog failed: %d %s", catalog.Code, catalog.Body.String())
 	}
 	body := catalog.Body.String()
-	i := strings.Index(body, "/opds/proxy?u=")
+	i := strings.Index(body, "/opds/proxy?id=")
 	if i < 0 {
 		t.Fatalf("acquisition link was not rewritten: %s", body)
 	}
-	start := i + len("/opds/proxy?u=")
+	start := i + len("/opds/proxy?id=")
 	end := strings.IndexAny(body[start:], `"&<`)
 	if end < 0 {
 		t.Fatalf("could not parse rewritten link: %s", body)
@@ -139,7 +139,7 @@ func TestOPDSProxyRewritesAndStreamsWithoutCaching(t *testing.T) {
 	token := body[start : start+end]
 	token = strings.ReplaceAll(token, "&amp;", "&")
 
-	req := httptest.NewRequest(http.MethodGet, "/opds/proxy?u="+token, nil)
+	req := httptest.NewRequest(http.MethodGet, "/opds/proxy?id="+token, nil)
 	req.SetBasicAuth("moon", "dav-secret")
 	req.Header.Set("Range", "bytes=1-3")
 	out := httptest.NewRecorder()
@@ -187,16 +187,15 @@ func TestOPDSProxyRejectsCrossOriginRedirect(t *testing.T) {
 	}
 }
 
-func TestOPDSProxyRejectsOtherOrigins(t *testing.T) {
+func TestOPDSProxyRejectsUnknownTargetID(t *testing.T) {
 	app := testApp(t)
 	app.cfg.ShelfMode = "opds"
 	app.cfg.ShelfURL = "https://books.example/opds"
-	token := base64.RawURLEncoding.EncodeToString([]byte("https://evil.example/secret"))
-	req := httptest.NewRequest(http.MethodGet, "/opds/proxy?u="+token, nil)
+	req := httptest.NewRequest(http.MethodGet, "/opds/proxy?id=client-controlled", nil)
 	req.SetBasicAuth("moon", "dav-secret")
 	out := httptest.NewRecorder()
 	app.Handler().ServeHTTP(out, req)
 	if out.Code != http.StatusBadRequest {
-		t.Fatalf("cross-origin proxy should be rejected, got %d", out.Code)
+		t.Fatalf("unknown proxy target should be rejected, got %d", out.Code)
 	}
 }
