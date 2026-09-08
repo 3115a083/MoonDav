@@ -18,6 +18,7 @@ type App struct {
 	backend Backend
 	bookMap *BookMap
 	dav     *webdav.Handler
+	shelfIndex shelfIndex
 }
 
 func New(cfg Config) (*App, error) {
