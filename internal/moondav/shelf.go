@@ -1,6 +1,7 @@
 package moondav
 
 import (
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
 	"fmt"
@@ -35,6 +36,16 @@ type shelfIndex struct {
 	root  string
 	at    time.Time
 	files []shelfFile
+}
+
+type shelfProxyLink struct {
+	URL       string
+	ExpiresAt time.Time
+}
+
+type shelfProxyRegistry struct {
+	mu    sync.Mutex
+	links map[string]shelfProxyLink
 }
 
 func (a *App) shelfHandler() http.HandlerFunc {
@@ -144,26 +155,70 @@ func (a *App) shelfTargetURL(r *http.Request) (*url.URL, error) {
 	if err != nil || base.Scheme == "" || base.Host == "" {
 		return nil, fmt.Errorf("invalid shelf URL")
 	}
-	encoded := r.URL.Query().Get("u")
-	if encoded == "" {
+	token := r.URL.Query().Get("t")
+	if token == "" {
 		if r.URL.Path != "/opds" && r.URL.Path != "/opds/" {
 			return nil, fmt.Errorf("missing target")
 		}
 		return base, nil
 	}
-	raw, err := base64.RawURLEncoding.DecodeString(encoded)
+	return a.resolveShelfLink(token)
+}
+
+func (a *App) registerShelfLink(target *url.URL) (string, bool) {
+	base, err := url.Parse(a.cfg.ShelfURL)
+	if err != nil || target == nil || target.User != nil ||
+		target.Scheme != base.Scheme || !strings.EqualFold(target.Host, base.Host) {
+		return "", false
+	}
+	var raw [18]byte
+	if _, err := rand.Read(raw[:]); err != nil {
+		return "", false
+	}
+	token := base64.RawURLEncoding.EncodeToString(raw[:])
+	now := time.Now()
+	a.shelfProxy.mu.Lock()
+	defer a.shelfProxy.mu.Unlock()
+	if a.shelfProxy.links == nil {
+		a.shelfProxy.links = make(map[string]shelfProxyLink)
+	}
+	for key, link := range a.shelfProxy.links {
+		if now.After(link.ExpiresAt) {
+			delete(a.shelfProxy.links, key)
+		}
+	}
+	if len(a.shelfProxy.links) >= 10000 {
+		a.shelfProxy.links = make(map[string]shelfProxyLink)
+	}
+	a.shelfProxy.links[token] = shelfProxyLink{
+		URL: target.String(),
+		ExpiresAt: now.Add(30 * time.Minute),
+	}
+	return token, true
+}
+
+func (a *App) resolveShelfLink(token string) (*url.URL, error) {
+	if len(token) < 16 || len(token) > 64 {
+		return nil, fmt.Errorf("invalid shelf token")
+	}
+	a.shelfProxy.mu.Lock()
+	link, ok := a.shelfProxy.links[token]
+	if ok && time.Now().After(link.ExpiresAt) {
+		delete(a.shelfProxy.links, token)
+		ok = false
+	}
+	a.shelfProxy.mu.Unlock()
+	if !ok {
+		return nil, fmt.Errorf("unknown or expired shelf token")
+	}
+	target, err := url.Parse(link.URL)
 	if err != nil {
 		return nil, err
 	}
-	target, err := url.Parse(string(raw))
-	if err != nil {
-		return nil, err
-	}
-	if target.Scheme != base.Scheme || !strings.EqualFold(target.Host, base.Host) {
-		return nil, fmt.Errorf("target leaves configured OPDS origin")
-	}
-	if target.User != nil {
-		return nil, fmt.Errorf("userinfo is not allowed in proxied URLs")
+	base, err := url.Parse(a.cfg.ShelfURL)
+	if err != nil || target.User != nil ||
+		target.Scheme != base.Scheme || !strings.EqualFold(target.Host, base.Host) {
+		return nil, fmt.Errorf("registered target leaves configured OPDS origin")
 	}
 	return target, nil
 }
@@ -187,8 +242,11 @@ func (a *App) rewriteOPDSLinks(body []byte, current *url.URL) []byte {
 		if err != nil || resolved.Scheme != base.Scheme || !strings.EqualFold(resolved.Host, base.Host) {
 			return match
 		}
-		token := base64.RawURLEncoding.EncodeToString([]byte(resolved.String()))
-		replacement := "/opds/proxy?u=" + url.QueryEscape(token)
+		token, ok := a.registerShelfLink(resolved)
+		if !ok {
+			return match
+		}
+		replacement := "/opds/proxy?t=" + url.QueryEscape(token)
 		return []byte(fmt.Sprintf(`%s="%s"`, parts[1], html.EscapeString(replacement)))
 	})
 }
@@ -254,8 +312,7 @@ func (a *App) filesystemOPDS(w http.ResponseWriter, r *http.Request) {
 		b.WriteString(`<link rel="next" href="` + xmlEscape(next) + `" type="application/atom+xml;profile=opds-catalog;kind=acquisition"/>`)
 	}
 	for _, f := range files[start:end] {
-		token := base64.RawURLEncoding.EncodeToString([]byte(f.Rel))
-		href := "/opds/file?f=" + url.QueryEscape(token)
+		href := "/opds/file?id=" + url.QueryEscape(f.ID)
 		b.WriteString("<entry>")
 		b.WriteString("<id>" + xmlEscape(f.ID) + "</id>")
 		b.WriteString("<title>" + xmlEscape(f.Title) + "</title>")
@@ -335,9 +392,25 @@ func (a *App) scanShelfFiles() ([]shelfFile, error) {
 }
 
 func (a *App) serveShelfFile(w http.ResponseWriter, r *http.Request) {
-	raw, err := base64.RawURLEncoding.DecodeString(r.URL.Query().Get("f"))
-	if err != nil || len(raw) == 0 {
+	id := strings.TrimSpace(r.URL.Query().Get("id"))
+	if id == "" {
 		http.Error(w, "invalid file reference", http.StatusBadRequest)
+		return
+	}
+	files, err := a.scanShelfFiles()
+	if err != nil {
+		http.Error(w, "shelf source unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	var selected *shelfFile
+	for i := range files {
+		if files[i].ID == id {
+			selected = &files[i]
+			break
+		}
+	}
+	if selected == nil {
+		http.NotFound(w, r)
 		return
 	}
 	root, err := filepath.Abs(a.cfg.ShelfRoot)
@@ -345,11 +418,7 @@ func (a *App) serveShelfFile(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid shelf root", http.StatusInternalServerError)
 		return
 	}
-	rel := filepath.Clean(filepath.FromSlash(string(raw)))
-	if rel == "." || rel == ".." || filepath.IsAbs(rel) || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		http.Error(w, "invalid file reference", http.StatusBadRequest)
-		return
-	}
+	rel := filepath.Clean(filepath.FromSlash(selected.Rel))
 	full := filepath.Join(root, rel)
 	actual, err := filepath.Abs(full)
 	if err != nil {
