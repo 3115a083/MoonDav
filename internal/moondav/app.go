@@ -52,6 +52,12 @@ func (a *App) Handler() http.Handler {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = io.WriteString(w, `{"status":"ok"}`)
 	})
+	mux.HandleFunc("/", a.auth(a.uiIndex))
+	mux.HandleFunc("/assets/app.css", a.auth(a.uiCSS))
+	mux.HandleFunc("/assets/app.js", a.auth(a.uiJS))
+	mux.HandleFunc("/api/dashboard", a.auth(a.apiDashboard))
+	mux.HandleFunc("/api/mappings", a.auth(a.apiMappings))
+	mux.HandleFunc("/api/conflicts", a.auth(a.apiConflicts))
 	mux.HandleFunc("/status", a.auth(a.status))
 	mux.Handle(a.cfg.BasePath, a.auth(a.davHandler()))
 	return secureHeaders(mux)
@@ -99,6 +105,11 @@ func (a *App) davHandler() http.HandlerFunc {
 					Percent:   pos.Percent,
 					UpdatedAt: time.Now().UTC(),
 				}
+				if old, ok := a.state.Get(key); ok {
+					entry.BackendPercent = old.BackendPercent
+					entry.BackendUpdatedAt = old.BackendUpdatedAt
+					entry.SuppressRemoteUntilPct = old.SuppressRemoteUntilPct
+				}
 				_ = a.state.Put(key, entry)
 				go a.push(key, pos.Percent)
 			}
@@ -112,18 +123,27 @@ func (a *App) push(bookKey string, p float64) {
 	bookID, ok := a.bookMap.Resolve(bookKey)
 	if !ok {
 		if a.cfg.BackendType != "none" {
-			log.Printf("no backend mapping for %s", bookKey)
+			e, _ := a.state.Get(bookKey)
+			e.LastError = "No backend mapping"
+			_ = a.state.Put(bookKey, e)
 		}
 		return
 	}
 	if err := a.backend.Push(bookID, p); err != nil {
 		log.Printf("backend push %s: %v", bookID, err)
+		e, _ := a.state.Get(bookKey)
+		e.LastError = err.Error()
+		_ = a.state.Put(bookKey, e)
 		return
 	}
 	e, _ := a.state.Get(bookKey)
 	e.BackendPercent = p
 	e.BackendUpdatedAt = time.Now().UTC()
 	e.RemoteAhead = false
+	e.LastError = ""
+	if p >= e.SuppressRemoteUntilPct {
+		e.SuppressRemoteUntilPct = 0
+	}
 	_ = a.state.Put(bookKey, e)
 }
 
@@ -145,28 +165,35 @@ func (a *App) reconcile() {
 
 		if entry.Percent > entry.BackendPercent+0.01 {
 			if err := a.backend.Push(id, entry.Percent); err != nil {
-				log.Printf("backend retry %s: %v", key, err)
+				entry.LastError = err.Error()
+				_ = a.state.Put(key, entry)
 				continue
 			}
 			entry.BackendPercent = entry.Percent
 			entry.BackendUpdatedAt = time.Now().UTC()
 			entry.RemoteAhead = false
+			entry.LastError = ""
 			_ = a.state.Put(key, entry)
 		}
 
 		remote, updated, err := a.backend.Pull(id)
 		if err != nil {
+			entry.LastError = err.Error()
+			_ = a.state.Put(key, entry)
 			continue
 		}
+		entry.LastError = ""
 		if remote > entry.Percent+0.01 {
 			entry.BackendPercent = remote
 			entry.BackendUpdatedAt = updated
-			entry.RemoteAhead = true
+			entry.RemoteAhead = entry.SuppressRemoteUntilPct+0.01 < remote
 			_ = a.state.Put(key, entry)
-			log.Printf(
-				"remote progress %.2f%% is ahead of Moon+ %.2f%% for %s; exact Moon+ position cannot be synthesized safely",
-				remote, entry.Percent, key,
-			)
+			if entry.RemoteAhead {
+				log.Printf("remote progress %.2f%% is ahead of Moon+ %.2f%% for %s", remote, entry.Percent, key)
+			}
+		} else {
+			entry.RemoteAhead = false
+			_ = a.state.Put(key, entry)
 		}
 	}
 }
@@ -185,6 +212,8 @@ func secureHeaders(next http.Handler) http.Handler {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Referrer-Policy", "no-referrer")
 		w.Header().Set("Cache-Control", "no-store")
+		w.Header().Set("X-Frame-Options", "DENY")
+		w.Header().Set("Content-Security-Policy", "default-src 'self'; style-src 'self'; script-src 'self'; img-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
 		next.ServeHTTP(w, r)
 	})
 }
