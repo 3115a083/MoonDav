@@ -160,6 +160,29 @@ func TestOPDSProxyRewritesAndStreamsWithoutCaching(t *testing.T) {
 	}
 }
 
+
+func TestOPDSProxyRejectsCrossOriginRedirect(t *testing.T) {
+	evil := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, "should not be reached")
+	}))
+	defer evil.Close()
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, evil.URL+"/book.epub", http.StatusFound)
+	}))
+	defer upstream.Close()
+
+	app := testApp(t)
+	app.cfg.ShelfMode = "opds"
+	app.cfg.ShelfURL = upstream.URL
+	app.cfg.ShelfMaxFeedBytes = 1 << 20
+
+	rec := request(t, app.Handler(), http.MethodGet, "/opds/", "", "moon", "dav-secret")
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("cross-origin redirect must fail, got %d", rec.Code)
+	}
+}
+
 func TestOPDSProxyRejectsOtherOrigins(t *testing.T) {
 	app := testApp(t)
 	app.cfg.ShelfMode = "opds"
