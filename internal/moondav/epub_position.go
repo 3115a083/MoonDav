@@ -118,7 +118,9 @@ func (a *App) koboToMoon(bookKey string, loc ReadingLocation, percent float64, b
 	var href string
 	for i, itemID := range pkg.Spine {
 		h := pkg.Items[itemID]
-		if normalizeHref(h) == source {
+		manifestSource := normalizeHref(h)
+		packageSource := normalizeHref(resolveEPUBPath(pkg.OPFPath, h))
+		if source == manifestSource || source == packageSource {
 			chapter = i
 			href = h
 			break
