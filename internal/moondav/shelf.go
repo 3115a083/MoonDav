@@ -66,11 +66,26 @@ func (a *App) proxyOPDS(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	req.Header.Set("User-Agent", "MoonDav/OPDS")
-	client := &http.Client{Transport: &http.Transport{
-		Proxy: http.ProxyFromEnvironment,
-		ResponseHeaderTimeout: 15 * time.Second,
-		IdleConnTimeout: 90 * time.Second,
-	}}
+	origin, _ := url.Parse(a.cfg.ShelfURL)
+	client := &http.Client{
+		Transport: &http.Transport{
+			Proxy: http.ProxyFromEnvironment,
+			ResponseHeaderTimeout: 15 * time.Second,
+			IdleConnTimeout: 90 * time.Second,
+		},
+		CheckRedirect: func(next *http.Request, via []*http.Request) error {
+			if len(via) >= 10 {
+				return fmt.Errorf("too many redirects")
+			}
+			if origin == nil || next.URL.Scheme != origin.Scheme || !strings.EqualFold(next.URL.Host, origin.Host) {
+				return fmt.Errorf("redirect leaves configured OPDS origin")
+			}
+			if a.cfg.ShelfUser != "" || a.cfg.ShelfPassword != "" {
+				next.SetBasicAuth(a.cfg.ShelfUser, a.cfg.ShelfPassword)
+			}
+			return nil
+		},
+	}
 	resp, err := client.Do(req)
 	if err != nil {
 		http.Error(w, "shelf source unavailable", http.StatusBadGateway)
@@ -352,7 +367,10 @@ func (a *App) serveShelfFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", mimeType)
-	w.Header().Set("Content-Disposition", `attachment; filename="`+strings.ReplaceAll(filepath.Base(actual), `"`, "")+`"`)
+	disposition := mime.FormatMediaType("attachment", map[string]string{"filename": filepath.Base(actual)})
+	if disposition != "" {
+		w.Header().Set("Content-Disposition", disposition)
+	}
 	w.Header().Set("Accept-Ranges", "bytes")
 	http.ServeContent(w, r, filepath.Base(actual), info.ModTime(), f)
 }
