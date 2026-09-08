@@ -1,10 +1,10 @@
 package moondav
 
 import (
-	"encoding/base64"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -32,8 +32,12 @@ func TestFilesystemShelfIsReadOnlyAndSupportsRange(t *testing.T) {
 		t.Fatalf("catalog does not contain acquisition entry: %s", rec.Body.String())
 	}
 
-	token := base64.RawURLEncoding.EncodeToString([]byte("Example.epub"))
-	req := httptest.NewRequest(http.MethodGet, "/opds/file?f="+token, nil)
+	files, err := app.scanShelfFiles()
+	if err != nil || len(files) != 1 {
+		t.Fatalf("could not resolve indexed shelf file: %+v %v", files, err)
+	}
+	fileID := url.QueryEscape(files[0].ID)
+	req := httptest.NewRequest(http.MethodGet, "/opds/file?id="+fileID, nil)
 	req.SetBasicAuth("moon", "dav-secret")
 	req.Header.Set("Range", "bytes=2-5")
 	out := httptest.NewRecorder()
@@ -45,7 +49,7 @@ func TestFilesystemShelfIsReadOnlyAndSupportsRange(t *testing.T) {
 		t.Fatalf("unexpected range body: %q", out.Body.String())
 	}
 
-	put := request(t, h, http.MethodPut, "/opds/file?f="+token, "damage", "moon", "dav-secret")
+	put := request(t, h, http.MethodPut, "/opds/file?id="+fileID, "damage", "moon", "dav-secret")
 	if put.Code != http.StatusMethodNotAllowed {
 		t.Fatalf("shelf must reject writes, got %d", put.Code)
 	}
@@ -123,11 +127,11 @@ func TestOPDSProxyRewritesAndStreamsWithoutCaching(t *testing.T) {
 		t.Fatalf("proxy catalog failed: %d %s", catalog.Code, catalog.Body.String())
 	}
 	body := catalog.Body.String()
-	i := strings.Index(body, "/opds/proxy?u=")
+	i := strings.Index(body, "/opds/proxy?t=")
 	if i < 0 {
 		t.Fatalf("acquisition link was not rewritten: %s", body)
 	}
-	start := i + len("/opds/proxy?u=")
+	start := i + len("/opds/proxy?t=")
 	end := strings.IndexAny(body[start:], `"&<`)
 	if end < 0 {
 		t.Fatalf("could not parse rewritten link: %s", body)
@@ -135,7 +139,7 @@ func TestOPDSProxyRewritesAndStreamsWithoutCaching(t *testing.T) {
 	token := body[start : start+end]
 	token = strings.ReplaceAll(token, "&amp;", "&")
 
-	req := httptest.NewRequest(http.MethodGet, "/opds/proxy?u="+token, nil)
+	req := httptest.NewRequest(http.MethodGet, "/opds/proxy?t="+token, nil)
 	req.SetBasicAuth("moon", "dav-secret")
 	req.Header.Set("Range", "bytes=1-3")
 	out := httptest.NewRecorder()
@@ -187,12 +191,20 @@ func TestOPDSProxyRejectsOtherOrigins(t *testing.T) {
 	app := testApp(t)
 	app.cfg.ShelfMode = "opds"
 	app.cfg.ShelfURL = "https://books.example/opds"
-	token := base64.RawURLEncoding.EncodeToString([]byte("https://evil.example/secret"))
-	req := httptest.NewRequest(http.MethodGet, "/opds/proxy?u="+token, nil)
+
+	evil, err := url.Parse("https://evil.example/secret")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := app.registerShelfLink(evil); ok {
+		t.Fatal("cross-origin target must never enter the proxy registry")
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/opds/proxy?t=not-a-valid-registered-token", nil)
 	req.SetBasicAuth("moon", "dav-secret")
 	out := httptest.NewRecorder()
 	app.Handler().ServeHTTP(out, req)
 	if out.Code != http.StatusBadRequest {
-		t.Fatalf("cross-origin proxy should be rejected, got %d", out.Code)
+		t.Fatalf("unknown proxy token should be rejected, got %d", out.Code)
 	}
 }
