@@ -26,6 +26,7 @@ MoonDav is designed to run inside the trusted home network. Use Tailscale or an 
 - Persistent offline queue. Backend outages never fail Moon+ WebDAV writes; the newest progress per book is stored on disk and retried with bounded exponential backoff.
 - Calibre-Web Kobo reading-state adapter.
 - Opt-in EPUB position translator between Moon+ chapter/offset coordinates and Calibre-Web/Kobo `KoboSpan` locations.
+- Shared zero-copy OPDS shelf backed by exactly one canonical source: Calibre-Web, BookLore, or a read-only filesystem.
 - BookLore / generic KOReader-sync adapter.
 - Separate HTTP Basic credentials for WebDAV devices and the admin dashboard/API.
 - Optional outage/recovery notifications through SMTP, Telegram, or a generic HTTPS webhook.
@@ -93,6 +94,12 @@ Moon+ cloud sync requires Moon+ Reader Pro.
 4. Enter `MOONDAV_DAV_USER` and `MOONDAV_DAV_PASSWORD`.
 5. Enable **Sync books across devices / Sync my shelf** if you also want shelf metadata in WebDAV.
 6. Run one manual sync.
+
+For the common book catalog, add a separate OPDS catalog in Moon+ under **Net Library → OPDS catalogs**:
+
+- URL: `https://moon.example.net/opds/`
+- Username: `MOONDAV_DAV_USER`
+- Password: `MOONDAV_DAV_PASSWORD`
 
 MoonDav does not need access to the ebook files for Moon+-to-Moon+ position sync.
 
@@ -219,6 +226,89 @@ Kobo reading-state locations identify a KoboSpan, not an arbitrary character ins
 This exact translator currently targets EPUB only. PDF, CBZ and other formats remain percentage-only.
 
 The implementation is opt-in during beta because Moon+ does not publish the format. Unit tests cover full codec round-trips, EPUB spine resolution, kepubify span generation, reverse mapping and path traversal. Real-device calibration with multiple EPUB structures and non-ASCII books is still valuable before making exact mode the default.
+
+## Shared Shelf without duplicate ebook storage
+
+MoonDav exposes a single reader-facing catalog at:
+
+```text
+https://moon.example.net/opds/
+```
+
+Use the MoonDav WebDAV username and password when Moon+ asks for OPDS credentials.
+
+The Shared Shelf is deliberately **single-source**. Choose exactly one canonical ebook source:
+
+- `opds`: proxy Calibre-Web or BookLore OPDS.
+- `filesystem`: index and stream a read-only directory.
+- `off`: no MoonDav catalog.
+
+MoonDav never imports, copies, renames, converts, or modifies ebook files for the Shared Shelf. Remote acquisitions are streamed directly from the configured OPDS server to the reader. Filesystem acquisitions are opened read-only and streamed with HTTP range support.
+
+Moon+ still downloads a book locally onto each Android device when you open or acquire it. That client-side copy is required by Moon+ and is outside MoonDav. The server-side library remains single-copy.
+
+### Calibre-Web as the canonical shelf
+
+Calibre-Web exposes an OPDS catalog and acquisition links. Configure a Calibre-Web user with download permission, then:
+
+```dotenv
+MOONDAV_SHELF_MODE=opds
+MOONDAV_SHELF_URL=http://calibre-web:8083/opds
+MOONDAV_SHELF_USER=reader
+MOONDAV_SHELF_PASSWORD_FILE=/run/secrets/shelf_password
+```
+
+MoonDav rewrites navigation, cover and acquisition links so Moon+ only talks to MoonDav. The upstream Calibre-Web credentials are not given to the Android device.
+
+### BookLore as the canonical shelf
+
+Enable BookLore OPDS and create an OPDS user. BookLore documents its catalog at `/api/v1/opds`. Configure:
+
+```dotenv
+MOONDAV_SHELF_MODE=opds
+MOONDAV_SHELF_URL=http://booklore:6060/api/v1/opds
+MOONDAV_SHELF_USER=reader
+MOONDAV_SHELF_PASSWORD_FILE=/run/secrets/shelf_password
+```
+
+This uses BookLore's supported OPDS interface instead of its undocumented internal application API.
+
+### Filesystem as the canonical shelf
+
+Mount the source read-only:
+
+```yaml
+volumes:
+  - moondav-data:/data
+  - /srv/ebooks:/shelf:ro
+```
+
+Configure:
+
+```dotenv
+MOONDAV_SHELF_MODE=filesystem
+MOONDAV_SHELF_ROOT=/shelf
+```
+
+MoonDav recursively indexes supported regular files and serves EPUB, PDF, MOBI, AZW/AZW3, FB2, CBZ and CBR. Symbolic links are not indexed or served.
+
+### Integrity and duplicate rules
+
+The design avoids ambiguous merging completely:
+
+1. Only one canonical source can be active at a time.
+2. MoonDav does not maintain a second ebook cache.
+3. The Shelf API accepts only `GET` and `HEAD`; writes return HTTP 405.
+4. Filesystem sources should be mounted `:ro`.
+5. Symlinks and path traversal are rejected.
+6. Remote proxy targets are restricted to the configured OPDS origin, preventing the proxy from becoming an arbitrary SSRF endpoint.
+7. `Range`, `ETag`, `Last-Modified`, `Content-Range` and `Accept-Ranges` are preserved for remote downloads.
+8. MoonDav applies no whole-download timeout after response headers, so large books are not truncated simply because they take longer than a fixed request deadline.
+9. OPDS XML is size-limited in memory. Ebook payloads are streamed and are never written into `/data`.
+
+Because there is only one active source, MoonDav never tries to guess whether two differently named files from Calibre-Web, BookLore and a filesystem are "the same book." That avoids false deduplication and accidental cross-source replacement.
+
+Moon+'s own shelf and reading-state metadata continue to synchronize through WebDAV. OPDS is the common distribution shelf for the actual book files.
 
 ## Backend configuration and secrets
 
@@ -468,6 +558,12 @@ If every Moon+ device can run Tailscale, this is simpler than a public reverse p
 | `MOONDAV_BOOK_MAP_FILE` | `/data/book-map.json` | Mapping file |
 | `MOONDAV_EXACT_POSITIONS` | `false` | Enable opt-in EPUB Moon+ ↔ KoboSpan translation |
 | `MOONDAV_LIBRARY_ROOT` | empty | Read-only root containing mapped EPUB files |
+| `MOONDAV_SHELF_MODE` | `off` | Shared Shelf source: `off`, `opds`, or `filesystem` |
+| `MOONDAV_SHELF_URL` | empty | Canonical Calibre-Web/BookLore OPDS URL |
+| `MOONDAV_SHELF_USER` | empty | Upstream OPDS Basic Auth username |
+| `MOONDAV_SHELF_PASSWORD` | empty | Upstream OPDS Basic Auth password |
+| `MOONDAV_SHELF_ROOT` | empty | Read-only filesystem shelf root |
+| `MOONDAV_SHELF_MAX_FEED_BYTES` | `8388608` | Maximum proxied OPDS XML size |
 | `MOONDAV_NOTIFY_AFTER` | `10m` | Delay before outage/error notification |
 | `MOONDAV_NOTIFY_REPEAT` | `6h` | Minimum repeat interval for persistent outage |
 | `MOONDAV_TELEGRAM_BOT_TOKEN` | empty | Telegram Bot token |
@@ -511,6 +607,7 @@ The provided image and Compose use:
 - non-root UID/GID `65532`
 - read-only container root filesystem
 - writable `/data` named volume only
+- optional ebook library and shelf mounts documented as read-only
 - all Linux capabilities dropped
 - `no-new-privileges`
 - no Docker socket
