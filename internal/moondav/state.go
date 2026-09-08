@@ -16,13 +16,28 @@ type StateEntry struct {
 	BackendUpdatedAt       time.Time `json:"backend_updated_at,omitempty"`
 	RemoteAhead            bool      `json:"remote_ahead,omitempty"`
 	SuppressRemoteUntilPct float64   `json:"suppress_remote_until_percent,omitempty"`
+	PendingSync            bool      `json:"pending_sync,omitempty"`
+	PendingPercent         float64   `json:"pending_percent,omitempty"`
+	RetryCount             int       `json:"retry_count,omitempty"`
+	NextRetryAt            time.Time `json:"next_retry_at,omitempty"`
+	LastSyncAttempt        time.Time `json:"last_sync_attempt,omitempty"`
 	LastError              string    `json:"last_error,omitempty"`
 }
 
+type BackendHealth struct {
+	State            string    `json:"state,omitempty"`
+	DownSince        time.Time `json:"down_since,omitempty"`
+	LastSuccess      time.Time `json:"last_success,omitempty"`
+	LastFailure      time.Time `json:"last_failure,omitempty"`
+	LastMessage      string    `json:"last_message,omitempty"`
+	LastNotification time.Time `json:"last_notification,omitempty"`
+}
+
 type StateStore struct {
-	mu      sync.Mutex
-	path    string
-	Entries map[string]StateEntry `json:"entries"`
+	mu            sync.Mutex
+	path          string
+	Entries       map[string]StateEntry `json:"entries"`
+	BackendHealth BackendHealth         `json:"backend_health,omitempty"`
 }
 
 func OpenState(path string) (*StateStore, error) {
@@ -61,6 +76,19 @@ func (s *StateStore) Snapshot() map[string]StateEntry {
 		out[k] = v
 	}
 	return out
+}
+
+func (s *StateStore) Health() BackendHealth {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.BackendHealth
+}
+
+func (s *StateStore) PutHealth(v BackendHealth) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.BackendHealth = v
+	return s.saveLocked()
 }
 
 func (s *StateStore) saveLocked() error {

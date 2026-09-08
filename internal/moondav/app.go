@@ -4,7 +4,6 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"io"
-	"log"
 	"net/http"
 	"path/filepath"
 	"strings"
@@ -120,9 +119,13 @@ func (a *App) davHandler() http.HandlerFunc {
 					entry.BackendPercent = old.BackendPercent
 					entry.BackendUpdatedAt = old.BackendUpdatedAt
 					entry.SuppressRemoteUntilPct = old.SuppressRemoteUntilPct
+					entry.LastError = old.LastError
 				}
+				entry.PendingSync = a.cfg.BackendType != "none"
+				entry.PendingPercent = pos.Percent
+				entry.NextRetryAt = time.Now().UTC()
 				_ = a.state.Put(key, entry)
-				go a.push(key, pos.Percent)
+				go a.push(key)
 			}
 			return
 		}
@@ -130,82 +133,191 @@ func (a *App) davHandler() http.HandlerFunc {
 	}
 }
 
-func (a *App) push(bookKey string, p float64) {
+func (a *App) push(bookKey string) {
+	entry, ok := a.state.Get(bookKey)
+	if !ok || a.cfg.BackendType == "none" {
+		return
+	}
+	if !entry.NextRetryAt.IsZero() && time.Now().UTC().Before(entry.NextRetryAt) {
+		return
+	}
 	bookID, ok := a.bookMap.Resolve(bookKey)
 	if !ok {
-		if a.cfg.BackendType != "none" {
-			e, _ := a.state.Get(bookKey)
-			e.LastError = "No backend mapping"
-			_ = a.state.Put(bookKey, e)
-		}
+		entry.PendingSync = true
+		entry.PendingPercent = entry.Percent
+		entry.LastError = "No backend mapping"
+		entry.NextRetryAt = time.Now().UTC().Add(15 * time.Minute)
+		_ = a.state.Put(bookKey, entry)
 		return
 	}
-	if err := a.backend.Push(bookID, p); err != nil {
-		log.Printf("backend push %s: %v", bookID, err)
-		e, _ := a.state.Get(bookKey)
-		e.LastError = err.Error()
-		_ = a.state.Put(bookKey, e)
+
+	target := entry.PendingPercent
+	if !entry.PendingSync {
+		target = entry.Percent
+	}
+	entry.LastSyncAttempt = time.Now().UTC()
+	_ = a.state.Put(bookKey, entry)
+
+	if err := a.backend.Push(bookID, target); err != nil {
+		a.syncFailure(bookKey, err)
 		return
 	}
-	e, _ := a.state.Get(bookKey)
-	e.BackendPercent = p
-	e.BackendUpdatedAt = time.Now().UTC()
-	e.RemoteAhead = false
-	e.LastError = ""
-	if p >= e.SuppressRemoteUntilPct {
-		e.SuppressRemoteUntilPct = 0
+	a.backendSuccess()
+
+	latest, _ := a.state.Get(bookKey)
+	latest.BackendPercent = target
+	latest.BackendUpdatedAt = time.Now().UTC()
+	latest.RetryCount = 0
+	latest.NextRetryAt = time.Time{}
+	latest.LastError = ""
+	latest.RemoteAhead = false
+	if latest.PendingPercent <= target+0.01 {
+		latest.PendingSync = false
+		latest.PendingPercent = 0
 	}
-	_ = a.state.Put(bookKey, e)
+	if target >= latest.SuppressRemoteUntilPct {
+		latest.SuppressRemoteUntilPct = 0
+	}
+	_ = a.state.Put(bookKey, latest)
+}
+
+func (a *App) syncFailure(bookKey string, err error) {
+	entry, ok := a.state.Get(bookKey)
+	if !ok {
+		return
+	}
+	entry.PendingSync = true
+	if entry.PendingPercent == 0 {
+		entry.PendingPercent = entry.Percent
+	}
+	entry.RetryCount++
+	entry.LastSyncAttempt = time.Now().UTC()
+
+	if temporary(err) {
+		entry.LastError = ""
+		entry.NextRetryAt = time.Now().UTC().Add(retryDelay(entry.RetryCount))
+		a.backendFailure("offline", err.Error())
+	} else {
+		entry.LastError = err.Error()
+		entry.NextRetryAt = time.Now().UTC().Add(15 * time.Minute)
+		a.backendFailure("error", err.Error())
+	}
+	_ = a.state.Put(bookKey, entry)
+}
+
+func retryDelay(attempt int) time.Duration {
+	delays := []time.Duration{
+		15 * time.Second, 30 * time.Second, time.Minute, 2 * time.Minute,
+		5 * time.Minute, 10 * time.Minute,
+	}
+	if attempt < 1 {
+		attempt = 1
+	}
+	if attempt > len(delays) {
+		return 10 * time.Minute
+	}
+	return delays[attempt-1]
+}
+
+func (a *App) backendFailure(state, message string) {
+	now := time.Now().UTC()
+	h := a.state.Health()
+	if h.State == "" || h.State == "online" {
+		h.DownSince = now
+		h.LastNotification = time.Time{}
+	}
+	h.State = state
+	h.LastFailure = now
+	h.LastMessage = message
+	_ = a.state.PutHealth(h)
+	a.maybeNotifyOutage(h)
+}
+
+func (a *App) maybeNotifyOutage(h BackendHealth) {
+	if h.DownSince.IsZero() || time.Since(h.DownSince) < a.cfg.NotifyAfter {
+		return
+	}
+	if !h.LastNotification.IsZero() && time.Since(h.LastNotification) < a.cfg.NotifyRepeat {
+		return
+	}
+	h.LastNotification = time.Now().UTC()
+	_ = a.state.PutHealth(h)
+	title := "MoonDav backend unavailable"
+	if h.State == "error" {
+		title = "MoonDav backend error"
+	}
+	go a.notify("backend_"+h.State, title, h.LastMessage)
+}
+
+func (a *App) backendSuccess() {
+	now := time.Now().UTC()
+	h := a.state.Health()
+	wasDown := h.State == "offline" || h.State == "error"
+	wasNotified := !h.LastNotification.IsZero()
+	downSince := h.DownSince
+	h.State = "online"
+	h.LastSuccess = now
+	h.LastMessage = ""
+	h.DownSince = time.Time{}
+	h.LastNotification = time.Time{}
+	_ = a.state.PutHealth(h)
+	if wasDown && wasNotified {
+		duration := now.Sub(downSince).Round(time.Second)
+		go a.notify("backend_recovered", "MoonDav backend recovered", "Backend connectivity was restored after "+duration.String()+". Queued reading progress will be synchronized automatically.")
+	}
 }
 
 func (a *App) reconcileLoop() {
-	ticker := time.NewTicker(time.Minute)
+	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
 	a.reconcile()
 	for range ticker.C {
 		a.reconcile()
+		h := a.state.Health()
+		if h.State == "offline" || h.State == "error" {
+			a.maybeNotifyOutage(h)
+		}
 	}
 }
 
 func (a *App) reconcile() {
+	now := time.Now().UTC()
 	for key, entry := range a.state.Snapshot() {
-		id, ok := a.bookMap.Resolve(key)
-		if !ok {
+		id, mapped := a.bookMap.Resolve(key)
+		if !mapped {
 			continue
 		}
 
-		if entry.Percent > entry.BackendPercent+0.01 {
-			if err := a.backend.Push(id, entry.Percent); err != nil {
-				entry.LastError = err.Error()
-				_ = a.state.Put(key, entry)
-				continue
+		if entry.PendingSync || entry.Percent > entry.BackendPercent+0.01 {
+			if entry.NextRetryAt.IsZero() || !now.Before(entry.NextRetryAt) {
+				a.push(key)
 			}
-			entry.BackendPercent = entry.Percent
-			entry.BackendUpdatedAt = time.Now().UTC()
-			entry.RemoteAhead = false
-			entry.LastError = ""
-			_ = a.state.Put(key, entry)
+			continue
 		}
 
 		remote, updated, err := a.backend.Pull(id)
 		if err != nil {
-			entry.LastError = err.Error()
-			_ = a.state.Put(key, entry)
+			if temporary(err) {
+				a.backendFailure("offline", err.Error())
+			} else {
+				entry.LastError = err.Error()
+				_ = a.state.Put(key, entry)
+				a.backendFailure("error", err.Error())
+			}
 			continue
 		}
+		a.backendSuccess()
 		entry.LastError = ""
 		if remote > entry.Percent+0.01 {
 			entry.BackendPercent = remote
 			entry.BackendUpdatedAt = updated
 			entry.RemoteAhead = entry.SuppressRemoteUntilPct+0.01 < remote
-			_ = a.state.Put(key, entry)
-			if entry.RemoteAhead {
-				log.Printf("remote progress %.2f%% is ahead of Moon+ %.2f%% for %s", remote, entry.Percent, key)
-			}
 		} else {
 			entry.RemoteAhead = false
-			_ = a.state.Put(key, entry)
+			entry.BackendPercent = remote
+			entry.BackendUpdatedAt = updated
 		}
+		_ = a.state.Put(key, entry)
 	}
 }
 
@@ -215,6 +327,7 @@ func (a *App) status(w http.ResponseWriter, r *http.Request) {
 		"backend":   a.cfg.BackendType,
 		"base_path": a.cfg.BasePath,
 		"entries":   a.state.Snapshot(),
+		"backend_health": a.state.Health(),
 	})
 }
 

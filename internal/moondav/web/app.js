@@ -17,6 +17,7 @@
     conflict: 'Conflict',
     unmapped: 'Unmapped',
     error: 'Error',
+    queued: 'Queued',
     'moon-ahead': 'Moon+ ahead',
     'remote-ahead': 'Backend ahead'
   }[status] || status);
@@ -127,8 +128,9 @@
   async function load() {
     try {
       data = await api('/api/dashboard');
+      const health = data.backend_health?.state || 'unknown';
       document.querySelector('#backendBadge').textContent =
-        data.backend === 'none' ? 'WebDAV only' : data.backend;
+        data.backend === 'none' ? 'WebDAV only' : data.backend + ' · ' + health;
       document.querySelector('#statBooks').textContent = data.summary.books;
       document.querySelector('#statConflicts').textContent = data.summary.conflicts;
       document.querySelector('#statUnmapped').textContent = data.summary.unmapped;

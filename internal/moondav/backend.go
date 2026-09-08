@@ -18,6 +18,33 @@ type Backend interface {
 	Pull(bookID string) (float64, time.Time, error)
 }
 
+type BackendError struct {
+	Temporary bool
+	Message   string
+}
+
+func (e *BackendError) Error() string { return e.Message }
+
+func temporary(err error) bool {
+	var be *BackendError
+	return errors.As(err, &be) && be.Temporary
+}
+
+func classifyHTTP(prefix string, status int, body string) error {
+	msg := fmt.Sprintf("%s: HTTP %d", prefix, status)
+	if body != "" {
+		msg += ": " + body
+	}
+	return &BackendError{
+		Temporary: status == http.StatusRequestTimeout || status == http.StatusTooManyRequests || status >= 500,
+		Message:   msg,
+	}
+}
+
+func networkError(prefix string, err error) error {
+	return &BackendError{Temporary: true, Message: prefix + ": " + err.Error()}
+}
+
 type noBackend struct{}
 
 func (noBackend) Push(string, float64) error { return nil }
@@ -49,12 +76,12 @@ func (b *CalibreWebBackend) Push(id string, percent float64) error {
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := b.client.Do(req)
 	if err != nil {
-		return err
+		return networkError("calibre-web push", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode/100 != 2 {
 		x, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
-		return fmt.Errorf("calibre-web push: %s: %s", resp.Status, string(x))
+		return classifyHTTP("calibre-web push", resp.StatusCode, string(x))
 	}
 	return nil
 }
@@ -62,11 +89,11 @@ func (b *CalibreWebBackend) Push(id string, percent float64) error {
 func (b *CalibreWebBackend) Pull(id string) (float64, time.Time, error) {
 	resp, err := b.client.Get(b.stateURL(id))
 	if err != nil {
-		return 0, time.Time{}, err
+		return 0, time.Time{}, networkError("calibre-web pull", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode/100 != 2 {
-		return 0, time.Time{}, fmt.Errorf("calibre-web pull: %s", resp.Status)
+		return 0, time.Time{}, classifyHTTP("calibre-web pull", resp.StatusCode, "")
 	}
 	var v []struct {
 		LastModified    string `json:"LastModified"`
@@ -75,7 +102,7 @@ func (b *CalibreWebBackend) Pull(id string) (float64, time.Time, error) {
 		} `json:"CurrentBookmark"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&v); err != nil || len(v) == 0 {
-		return 0, time.Time{}, fmt.Errorf("invalid calibre-web state")
+		return 0, time.Time{}, &BackendError{Temporary: false, Message: "invalid calibre-web state"}
 	}
 	t, _ := time.Parse(time.RFC3339, v[0].LastModified)
 	return v[0].CurrentBookmark.ProgressPercent, t, nil
@@ -101,19 +128,16 @@ func (b *KOBackend) req(method, path string, body io.Reader) (*http.Request, err
 }
 
 func (b *KOBackend) Push(id string, p float64) error {
-	payload := map[string]any{
-		"document": id, "progress": fmt.Sprintf("%.2f%%", p), "percentage": p / 100,
-		"device": "MoonDav", "device_id": "MOONDAV",
-	}
+	payload := map[string]any{"document": id, "progress": fmt.Sprintf("%.2f%%", p), "percentage": p / 100, "device": "MoonDav", "device_id": "MOONDAV"}
 	data, _ := json.Marshal(payload)
 	req, _ := b.req(http.MethodPut, "/syncs/progress", bytes.NewReader(data))
 	resp, err := b.client.Do(req)
 	if err != nil {
-		return err
+		return networkError("booklore/kosync push", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode/100 != 2 {
-		return fmt.Errorf("booklore/kosync push: %s", resp.Status)
+		return classifyHTTP("booklore/kosync push", resp.StatusCode, "")
 	}
 	return nil
 }
@@ -122,18 +146,18 @@ func (b *KOBackend) Pull(id string) (float64, time.Time, error) {
 	req, _ := b.req(http.MethodGet, "/syncs/progress/"+url.PathEscape(id), nil)
 	resp, err := b.client.Do(req)
 	if err != nil {
-		return 0, time.Time{}, err
+		return 0, time.Time{}, networkError("booklore/kosync pull", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode/100 != 2 {
-		return 0, time.Time{}, fmt.Errorf("booklore/kosync pull: %s", resp.Status)
+		return 0, time.Time{}, classifyHTTP("booklore/kosync pull", resp.StatusCode, "")
 	}
 	var v struct {
 		Percentage float64 `json:"percentage"`
 		Timestamp  int64   `json:"timestamp"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&v); err != nil {
-		return 0, time.Time{}, err
+		return 0, time.Time{}, &BackendError{Temporary: false, Message: "invalid booklore/kosync state"}
 	}
 	return v.Percentage * 100, time.Unix(v.Timestamp, 0), nil
 }

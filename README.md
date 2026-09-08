@@ -23,10 +23,11 @@ MoonDav is designed to run inside the trusted home network. Use Tailscale or an 
 - Stores Moon+ `.po`, `.an`, shelf, settings, and related files under `/data/webdav`.
 - Preserves Moon+ position files verbatim.
 - Default `furthest` conflict policy prevents a stale offline device from overwriting newer progress.
-- Persistent retry state. Failed backend writes are retried after restart and every minute.
+- Persistent offline queue. Backend outages never fail Moon+ WebDAV writes; the newest progress per book is stored on disk and retried with bounded exponential backoff.
 - Calibre-Web Kobo reading-state adapter.
 - BookLore / generic KOReader-sync adapter.
-- Mandatory HTTP Basic authentication for WebDAV and `/status`.
+- Separate HTTP Basic credentials for WebDAV devices and the admin dashboard/API.
+- Optional outage/recovery notifications through SMTP, Telegram, or a generic HTTPS webhook.
 - Hardened non-root container with a read-only root filesystem and no Linux capabilities.
 - GitHub Actions builds multi-architecture images and publishes them to GHCR.
 
@@ -46,7 +47,6 @@ services:
       - "127.0.0.1:8765:8765"
     volumes:
       - moondav-data:/data
-      - ./config:/config:ro
     read_only: true
     tmpfs:
       - /tmp:size=8m,mode=1777
@@ -154,6 +154,104 @@ Values are:
 - **BookLore / KOReader sync:** the document identifier used by the KOReader sync endpoint.
 
 Restart MoonDav after editing the mapping file.
+
+## Backend configuration and secrets
+
+MoonDav deliberately does **not** allow backend credentials to be edited in the web dashboard.
+
+Backend type, URL, and credentials are startup configuration. This keeps deployments reproducible and prevents a compromised dashboard session from replacing or reading Calibre-Web, BookLore, SMTP, Telegram, or webhook credentials.
+
+Use environment variables for non-secret configuration:
+
+```dotenv
+MOONDAV_BACKEND=calibre-web
+MOONDAV_BACKEND_URL=http://calibre-web:8083
+```
+
+For credentials, MoonDav supports both the normal variable and a matching `_FILE` variable. The file value takes precedence:
+
+```dotenv
+MOONDAV_BACKEND_TOKEN_FILE=/run/secrets/backend_token
+MOONDAV_DAV_PASSWORD_FILE=/run/secrets/dav_password
+MOONDAV_ADMIN_PASSWORD_FILE=/run/secrets/admin_password
+```
+
+This works with Docker Compose secrets or read-only mounted secret files. See `compose.secrets.example.yml`.
+
+The dashboard shows the selected backend and its health state, but never returns credentials.
+
+## Offline backend behavior
+
+Calibre-Web and BookLore are treated as eventually available services.
+
+When a backend cannot be reached because of DNS failure, connection refusal, timeout, HTTP 408, HTTP 429, or a 5xx response:
+
+1. Moon+'s WebDAV request still succeeds after the Moon+ state has been saved locally.
+2. The newest normalized reading percentage is persisted in `/data/state.json`.
+3. The book is shown as **Queued**, not **Error**.
+4. Retry uses bounded exponential backoff: 15s, 30s, 1m, 2m, 5m, then every 10m.
+5. A newer Moon+ position replaces the older pending percentage. Intermediate stale writes do not accumulate.
+6. Once the backend is reachable, the queued state is delivered automatically and the queue entry clears.
+
+Authentication failures, invalid mappings, malformed backend responses, and other non-temporary failures remain visible as errors because retrying them without a configuration change is unlikely to help.
+
+Backend health is persisted too, so restart does not lose outage context.
+
+## Notifications
+
+Notifications are optional and disabled unless a channel is configured. MoonDav waits before alerting, so short network interruptions do not create noise.
+
+Defaults:
+
+```dotenv
+MOONDAV_NOTIFY_AFTER=10m
+MOONDAV_NOTIFY_REPEAT=6h
+```
+
+A recovery notification is sent only when an outage notification was previously emitted.
+
+### Telegram Bot
+
+```dotenv
+MOONDAV_TELEGRAM_BOT_TOKEN_FILE=/run/secrets/telegram_bot_token
+MOONDAV_TELEGRAM_CHAT_ID=123456789
+```
+
+### SMTP
+
+STARTTLS example:
+
+```dotenv
+MOONDAV_SMTP_HOST=smtp.example.net
+MOONDAV_SMTP_PORT=587
+MOONDAV_SMTP_TLS=starttls
+MOONDAV_SMTP_USER=moondav@example.net
+MOONDAV_SMTP_PASSWORD_FILE=/run/secrets/smtp_password
+MOONDAV_SMTP_FROM=moondav@example.net
+MOONDAV_SMTP_TO=you@example.net
+```
+
+Implicit TLS on port 465 is supported with `MOONDAV_SMTP_TLS=tls`. TLS 1.2 or newer is required.
+
+### Generic HTTPS webhook
+
+```dotenv
+MOONDAV_WEBHOOK_URL=https://notify.example.net/moondav
+MOONDAV_WEBHOOK_BEARER_FILE=/run/secrets/webhook_bearer
+```
+
+MoonDav sends JSON shaped like:
+
+```json
+{
+  "kind": "backend_offline",
+  "title": "MoonDav backend unavailable",
+  "message": "calibre-web push: ...",
+  "time": "2026-09-08T12:00:00Z"
+}
+```
+
+The generic webhook can be used with notification gateways or automation platforms without adding provider-specific code to MoonDav.
 
 ## Calibre-Web
 
@@ -303,6 +401,19 @@ If every Moon+ device can run Tailscale, this is simpler than a public reverse p
 | `MOONDAV_BACKEND_PASSWORD` | empty | BookLore/KOReader password |
 | `MOONDAV_BACKEND_KEY` | empty | Precomputed KOReader key |
 | `MOONDAV_BOOK_MAP_FILE` | `/data/book-map.json` | Mapping file |
+| `MOONDAV_NOTIFY_AFTER` | `10m` | Delay before outage/error notification |
+| `MOONDAV_NOTIFY_REPEAT` | `6h` | Minimum repeat interval for persistent outage |
+| `MOONDAV_TELEGRAM_BOT_TOKEN` | empty | Telegram Bot token |
+| `MOONDAV_TELEGRAM_CHAT_ID` | empty | Telegram destination chat |
+| `MOONDAV_WEBHOOK_URL` | empty | Generic HTTPS webhook |
+| `MOONDAV_WEBHOOK_BEARER` | empty | Optional webhook bearer secret |
+| `MOONDAV_SMTP_HOST` | empty | SMTP server |
+| `MOONDAV_SMTP_PORT` | `587` | SMTP port |
+| `MOONDAV_SMTP_TLS` | `starttls` | `starttls` or implicit `tls` |
+| `MOONDAV_SMTP_USER` | empty | SMTP username |
+| `MOONDAV_SMTP_PASSWORD` | empty | SMTP password |
+| `MOONDAV_SMTP_FROM` | empty | Notification sender |
+| `MOONDAV_SMTP_TO` | empty | Comma-separated recipients |
 
 ## Health and status
 
@@ -322,7 +433,7 @@ curl -u moon:password https://moon.example.net/status
 
 ## Data and backup
 
-Back up the Docker volume `moondav-data`. It contains WebDAV data, sync state, and `book-map.json`.
+Back up the Docker volume `moondav-data`. It contains WebDAV data, queued progress, backend health, sync state, and `book-map.json`.
 
 `state.json` is updated through a temporary file and atomic rename. The original `.po` remains the exact Moon+ resume-position source of truth.
 
