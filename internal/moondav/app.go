@@ -208,13 +208,13 @@ func (a *App) syncFailure(bookKey string, err error) {
 func retryDelay(attempt int) time.Duration {
 	delays := []time.Duration{
 		15 * time.Second, 30 * time.Second, time.Minute, 2 * time.Minute,
-		5 * time.Minute, 10 * time.Minute, 30 * time.Minute,
+		5 * time.Minute, 10 * time.Minute,
 	}
 	if attempt < 1 {
 		attempt = 1
 	}
 	if attempt > len(delays) {
-		return time.Hour
+		return 10 * time.Minute
 	}
 	return delays[attempt-1]
 }
