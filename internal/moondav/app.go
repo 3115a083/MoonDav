@@ -19,6 +19,7 @@ type App struct {
 	bookMap *BookMap
 	dav     *webdav.Handler
 	shelfIndex shelfIndex
+	shelfProxy shelfProxyRegistry
 }
 
 func New(cfg Config) (*App, error) {
