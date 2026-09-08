@@ -155,15 +155,16 @@ func (a *App) shelfTargetURL(r *http.Request) (*url.URL, error) {
 	if err != nil {
 		return nil, err
 	}
-	target, err := url.Parse(string(raw))
+	ref, err := url.Parse(string(raw))
 	if err != nil {
 		return nil, err
 	}
+	if ref.IsAbs() || ref.Host != "" || ref.User != nil {
+		return nil, fmt.Errorf("proxied shelf target must be relative")
+	}
+	target := base.ResolveReference(ref)
 	if target.Scheme != base.Scheme || !strings.EqualFold(target.Host, base.Host) {
 		return nil, fmt.Errorf("target leaves configured OPDS origin")
-	}
-	if target.User != nil {
-		return nil, fmt.Errorf("userinfo is not allowed in proxied URLs")
 	}
 	return target, nil
 }
@@ -187,7 +188,11 @@ func (a *App) rewriteOPDSLinks(body []byte, current *url.URL) []byte {
 		if err != nil || resolved.Scheme != base.Scheme || !strings.EqualFold(resolved.Host, base.Host) {
 			return match
 		}
-		token := base64.RawURLEncoding.EncodeToString([]byte(resolved.String()))
+		relative := resolved.EscapedPath()
+		if resolved.RawQuery != "" {
+			relative += "?" + resolved.RawQuery
+		}
+		token := base64.RawURLEncoding.EncodeToString([]byte(relative))
 		replacement := "/opds/proxy?u=" + url.QueryEscape(token)
 		return []byte(fmt.Sprintf(`%s="%s"`, parts[1], html.EscapeString(replacement)))
 	})
@@ -254,8 +259,8 @@ func (a *App) filesystemOPDS(w http.ResponseWriter, r *http.Request) {
 		b.WriteString(`<link rel="next" href="` + xmlEscape(next) + `" type="application/atom+xml;profile=opds-catalog;kind=acquisition"/>`)
 	}
 	for _, f := range files[start:end] {
-		token := base64.RawURLEncoding.EncodeToString([]byte(f.Rel))
-		href := "/opds/file?f=" + url.QueryEscape(token)
+		token := base64.RawURLEncoding.EncodeToString([]byte(f.ID))
+		href := "/opds/file?id=" + url.QueryEscape(token)
 		b.WriteString("<entry>")
 		b.WriteString("<id>" + xmlEscape(f.ID) + "</id>")
 		b.WriteString("<title>" + xmlEscape(f.Title) + "</title>")
@@ -335,32 +340,35 @@ func (a *App) scanShelfFiles() ([]shelfFile, error) {
 }
 
 func (a *App) serveShelfFile(w http.ResponseWriter, r *http.Request) {
-	raw, err := base64.RawURLEncoding.DecodeString(r.URL.Query().Get("f"))
-	if err != nil || len(raw) == 0 {
+	rawID, err := base64.RawURLEncoding.DecodeString(r.URL.Query().Get("id"))
+	if err != nil || len(rawID) == 0 {
 		http.Error(w, "invalid file reference", http.StatusBadRequest)
 		return
 	}
+	requestedID := string(rawID)
+	files, err := a.scanShelfFiles()
+	if err != nil {
+		http.Error(w, "shelf source unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	var selected *shelfFile
+	for i := range files {
+		if files[i].ID == requestedID {
+			selected = &files[i]
+			break
+		}
+	}
+	if selected == nil {
+		http.NotFound(w, r)
+		return
+	}
+
 	root, err := filepath.Abs(a.cfg.ShelfRoot)
 	if err != nil {
 		http.Error(w, "invalid shelf root", http.StatusInternalServerError)
 		return
 	}
-	rel := filepath.Clean(filepath.FromSlash(string(raw)))
-	if rel == "." || rel == ".." || filepath.IsAbs(rel) || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		http.Error(w, "invalid file reference", http.StatusBadRequest)
-		return
-	}
-	full := filepath.Join(root, rel)
-	actual, err := filepath.Abs(full)
-	if err != nil {
-		http.Error(w, "invalid file reference", http.StatusBadRequest)
-		return
-	}
-	check, err := filepath.Rel(root, actual)
-	if err != nil || check == ".." || strings.HasPrefix(check, ".."+string(filepath.Separator)) {
-		http.Error(w, "invalid file reference", http.StatusBadRequest)
-		return
-	}
+	actual := filepath.Join(root, filepath.FromSlash(selected.Rel))
 	linfo, err := os.Lstat(actual)
 	if err != nil || linfo.Mode()&os.ModeSymlink != 0 || !linfo.Mode().IsRegular() {
 		http.NotFound(w, r)
@@ -377,16 +385,8 @@ func (a *App) serveShelfFile(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "could not stat source file", http.StatusInternalServerError)
 		return
 	}
-	mimeType, ok := shelfMIME(strings.ToLower(filepath.Ext(actual)))
-	if !ok {
-		http.Error(w, "unsupported format", http.StatusUnsupportedMediaType)
-		return
-	}
-	w.Header().Set("Content-Type", mimeType)
-	disposition := mime.FormatMediaType("attachment", map[string]string{"filename": filepath.Base(actual)})
-	if disposition != "" {
-		w.Header().Set("Content-Disposition", disposition)
-	}
+	w.Header().Set("Content-Type", selected.MIME)
+	w.Header().Set("Content-Disposition", `attachment; filename="`+strings.ReplaceAll(filepath.Base(actual), `"`, "")+`"`)
 	w.Header().Set("Accept-Ranges", "bytes")
 	http.ServeContent(w, r, filepath.Base(actual), info.ModTime(), f)
 }
