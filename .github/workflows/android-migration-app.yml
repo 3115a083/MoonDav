@@ -46,7 +46,7 @@ jobs:
                   '<manifest xmlns:android="http://schemas.android.com/apk/res/android">',
                   '<manifest xmlns:android="http://schemas.android.com/apk/res/android" xmlns:tools="http://schemas.android.com/tools">'
               )
-          receiver = '        <receiver android:name="androidx.profileinstaller.ProfileInstallReceiver" tools:node="remove" />\n'
+          receiver = '        <receiver android:name="androidx.profileinstaller.ProfileInstallReceiver" tools:node="remove" tools:ignore="MissingClass" />\n'
           if "androidx.profileinstaller.ProfileInstallReceiver" not in m:
               m = m.replace("    </application>", receiver + "    </application>")
           manifest.write_text(m)
