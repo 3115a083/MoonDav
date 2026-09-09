@@ -34,7 +34,7 @@ jobs:
 
           resolver = Path("/tmp/src/MoonMigration/app/src/main/java/dev/moonmigration/app/EpubPositionResolver.kt")
           r = resolver.read_text()
-          r = r.replace("import javax.xml.XMLConstants\\n", "")
+          r = r.replace("import javax.xml.XMLConstants\n", "")
           r = r.replace('setAttribute(XMLConstants.ACCESS_EXTERNAL_DTD, "")', 'setAttribute("http://javax.xml.XMLConstants/property/accessExternalDTD", "")')
           r = r.replace('setAttribute(XMLConstants.ACCESS_EXTERNAL_SCHEMA, "")', 'setAttribute("http://javax.xml.XMLConstants/property/accessExternalSchema", "")')
           resolver.write_text(r)
@@ -47,14 +47,14 @@ jobs:
               marker = "        val normalized ="
               if marker not in k:
                   raise SystemExit("Expected KOSync URL normalization marker not found")
-              insert = '        if (scheme == "http") {\\n            require(allowLan && allowHttpLan && addresses.all(::isPrivate)) {\\n                "Unencrypted HTTP is allowed only for explicitly enabled private LAN targets"\\n            }\\n        }\\n'
+              insert = '        if (scheme == "http") {\n            require(allowLan && allowHttpLan && addresses.all(::isPrivate)) {\n                "Unencrypted HTTP is allowed only for explicitly enabled private LAN targets"\n            }\n        }\n'
               k = k.replace(marker, insert + marker, 1)
           kosync.write_text(k)
 
           test = Path("/tmp/src/MoonMigration/app/src/test/java/dev/moonmigration/app/UtilityTest.kt")
           t = test.read_text()
           if "allowsExplicitPrivateLanHttpOnly" not in t:
-              extra = '\\n    @Test fun allowsExplicitPrivateLanHttpOnly() {\\n        val uri = KoSyncClient.validateBaseUrl("http://192.168.1.20:8080", allowLan = true, allowHttpLan = true)\\n        assertEquals("http", uri.scheme)\\n    }\\n\\n    @Test(expected = IllegalArgumentException::class)\\n    fun rejectsPublicHttpEvenWhenLanHttpEnabled() {\\n        KoSyncClient.validateBaseUrl("http://8.8.8.8", allowLan = true, allowHttpLan = true)\\n    }\\n\\n    @Test(expected = IllegalArgumentException::class)\\n    fun rejectsPrivateLanWithoutOptIn() {\\n        KoSyncClient.validateBaseUrl("https://192.168.1.20", allowLan = false, allowHttpLan = false)\\n    }\\n\\n    @Test(expected = IllegalArgumentException::class)\\n    fun rejectsUrlUserInfo() {\\n        KoSyncClient.validateBaseUrl("https://user:secret@8.8.8.8", allowLan = false, allowHttpLan = false)\\n    }\\n'
+              extra = '\n    @Test fun allowsExplicitPrivateLanHttpOnly() {\n        val uri = KoSyncClient.validateBaseUrl("http://192.168.1.20:8080", allowLan = true, allowHttpLan = true)\n        assertEquals("http", uri.scheme)\n    }\n\n    @Test(expected = IllegalArgumentException::class)\n    fun rejectsPublicHttpEvenWhenLanHttpEnabled() {\n        KoSyncClient.validateBaseUrl("http://8.8.8.8", allowLan = true, allowHttpLan = true)\n    }\n\n    @Test(expected = IllegalArgumentException::class)\n    fun rejectsPrivateLanWithoutOptIn() {\n        KoSyncClient.validateBaseUrl("https://192.168.1.20", allowLan = false, allowHttpLan = false)\n    }\n\n    @Test(expected = IllegalArgumentException::class)\n    fun rejectsUrlUserInfo() {\n        KoSyncClient.validateBaseUrl("https://user:secret@8.8.8.8", allowLan = false, allowHttpLan = false)\n    }\n'
               i = t.rfind("}")
               test.write_text(t[:i] + extra + t[i:])
           PYFIX
