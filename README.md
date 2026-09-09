@@ -443,6 +443,24 @@ Without exact mode, MoonDav polls the mapped Calibre-Web state and reports `remo
 
 With `MOONDAV_EXACT_POSITIONS=true`, a valid KoboSpan is translated back into the mounted EPUB's spine chapter and character coordinate. MoonDav then updates the Moon+ `.po` while preserving its original timestamp. A percentage without a KoboSpan is never used to fabricate an exact Moon+ position.
 
+## Calibre-Web Automated and Companion interoperability
+
+Calibre-Web Automated exposes a KOReader-compatible sync service under `/kosync`. Calibre Web Companion uses the same service for its KOReader Sync integration.
+
+Configure MoonDav with:
+
+```dotenv
+MOONDAV_BACKEND=cwa
+MOONDAV_BACKEND_URL=http://calibre-web-automated:8083
+MOONDAV_BACKEND_USER=reader
+MOONDAV_BACKEND_PASSWORD=your-cwa-password
+MOONDAV_LIBRARY_ROOT=/books
+```
+
+When a mapping has an `epub_path`, MoonDav calculates KOReader's partial-MD5 document identifier directly from the read-only source EPUB. This is the same identifier CWA and Calibre Web Companion use, so Moon+, KOReader and Companion converge on the same CWA progress row without manually copying hashes.
+
+`backend_id` remains the fallback when the EPUB is unavailable or no `epub_path` is configured. CWA/KOReader interoperability is percentage-based. Exact Moon+ ↔ KoboSpan translation remains specific to the `calibre-web` Kobo backend.
+
 ## BookLore
 
 BookLore exposes a KOReader-compatible sync endpoint and supports progress synchronization between KOReader and BookLore.
@@ -549,7 +567,7 @@ If every Moon+ device can run Tailscale, this is simpler than a public reverse p
 | `MOONDAV_ADMIN_PASSWORD` | required | Dashboard/API Basic Auth password |
 | `MOONDAV_MAX_UPLOAD_BYTES` | `8388608` | PUT size limit |
 | `MOONDAV_CONFLICT_POLICY` | `furthest` | `furthest` or `latest` |
-| `MOONDAV_BACKEND` | `none` | `none`, `calibre-web`, `booklore`, `kosync` |
+| `MOONDAV_BACKEND` | `none` | `none`, `calibre-web`, `calibre-web-automated`/`cwa`, `booklore`, `kosync` |
 | `MOONDAV_BACKEND_URL` | empty | Backend base URL |
 | `MOONDAV_BACKEND_TOKEN` | empty | Calibre-Web Kobo token |
 | `MOONDAV_BACKEND_USER` | empty | BookLore/KOReader username |
