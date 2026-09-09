@@ -81,7 +81,7 @@ jobs:
           fi
           test "$(grep -RIl 'Synthetic annotation data\|Example Book\|Synthetic Author' "$SRC/app/src/test" | wc -l)" -ge 1
           ! grep -RInE --exclude-dir=build --exclude-dir=.gradle '/home/|/Users/|content://|file://' "$SRC"
-          test -z "$(find "$SRC" -type f \\( -name '*.po' -o -name '*.an' -o -name '*.mrexpt' -o -name '*.mrpro' \\) -print -quit)"
+          test -z "$(find "$SRC" -type f \( -name '*.po' -o -name '*.an' -o -name '*.mrexpt' -o -name '*.mrpro' \) -print -quit)"
 
       - uses: actions/setup-java@v4
         with:
