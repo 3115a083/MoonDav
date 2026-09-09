@@ -33,17 +33,19 @@ jobs:
 
           main = Path("/tmp/src/MoonMigration/app/src/main/java/dev/moonmigration/app/MainActivity.kt")
           s = main.read_text()
-          s = s.replace("val text = TextView(this).apply {", "val titleView = TextView(this).apply {")
-          s = s.replace("addView(text,", "addView(titleView,")
+          s = s.replace(
+              "val text = TextView(this).apply {\n                text =",
+              "val text = TextView(this).apply {\n                this.text ="
+          )
           main.write_text(s)
 
-          net = Path("/tmp/src/MoonMigration/app/src/main/java/dev/moonmigration/app/Net.kt")
-          s = net.read_text()
+          build = Path("/tmp/src/MoonMigration/app/build.gradle.kts")
+          s = build.read_text()
           s = s.replace(
-              "headers.forEach { (name, value) ->",
-              "for ((name, value) in headers) {"
+              'kotlinOptions { jvmTarget = "17" }',
+              'kotlinOptions { jvmTarget = "17"; freeCompilerArgs += "-XXLanguage:+BreakContinueInInlineLambdas" }'
           )
-          net.write_text(s)
+          build.write_text(s)
           PY
 
       - name: Privacy and secret checks
