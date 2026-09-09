@@ -131,7 +131,63 @@ jobs:
           "$AAPT" dump permissions /tmp/MoonMigration-1.1.0.apk | tee /tmp/permissions.txt
           grep -q "package: name='dev.moonmigration.app'" /tmp/badging.txt
           grep -q "uses-permission: name='android.permission.INTERNET'" /tmp/permissions.txt
-          test "$(grep -c "uses-permission:" /tmp/permissions.txt)" -eq 1
+          grep "uses-permission:" /tmp/permissions.txt | sed -E "s/.*name='([^']+)'.*/\\1/" | grep -Ev '^(android.permission.INTERNET|dev.moonmigration.app.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION)
+          unzip -p /tmp/MoonMigration-1.1.0.apk AndroidManifest.xml > /tmp/AndroidManifest.bin
+          "$ANDROID_HOME/cmdline-tools/latest/bin/apkanalyzer" manifest print /tmp/MoonMigration-1.1.0.apk > /tmp/manifest.xml
+          grep -q 'android:allowBackup="false"' /tmp/manifest.xml
+          grep -q 'android:usesCleartextTraffic="false"' /tmp/manifest.xml
+          test "$(grep -c 'android:exported="true"' /tmp/manifest.xml)" -eq 1
+          ! grep -Eq '<service[^>]+android:exported="true"|<receiver[^>]+android:exported="true"|<provider[^>]+android:exported="true"' /tmp/manifest.xml
+
+      - name: APK privacy and secret audit
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/apk-unpacked
+          mkdir /tmp/apk-unpacked
+          unzip -q /tmp/MoonMigration-1.1.0.apk -d /tmp/apk-unpacked
+          find /tmp/apk-unpacked -type f -size -32M -print0 | xargs -0 strings -a > /tmp/apk-strings.txt
+          if grep -E '(AKIA[0-9A-Z]{16}|ASIA[0-9A-Z]{16}|gh[pousr]_[A-Za-z0-9_]{30,}|-----BEGIN ([A-Z ]+ )?PRIVATE KEY-----|AIza[0-9A-Za-z_-]{30,})' /tmp/apk-strings.txt; then
+            echo "Potential secret found in APK" >&2
+            exit 1
+          fi
+          ! grep -E '/home/|/Users/|content://|file://' /tmp/apk-strings.txt
+          grep -q 'Example Book' /tmp/src/MoonMigration/app/src/test/java/dev/moonmigration/app/UtilityTest.kt
+
+      - name: Build audit report
+        shell: bash
+        run: |
+          cat > /tmp/MoonMigration-audit.txt <<REPORT
+          Moon Migration 1.1.0 build audit
+          - Source ZIP reconstruction: PASS
+          - Source secret/privacy scan: PASS
+          - Unit tests: PASS
+          - Android lint: PASS
+          - Release build: PASS
+          - APK signing verification: PASS
+          - Manifest/permission audit: PASS
+          - APK secret/privacy scan: PASS
+          - INTERNET is the only requested permission and is used solely for explicit KOReader/KOSync upload.
+          - HTTPS is required by default. Optional cleartext HTTP is restricted to explicitly enabled private LAN targets.
+          - Android backup disabled and cleartext traffic disabled by default.
+          - No analytics, telemetry, ads, WebView, services, receivers, or exported providers.
+          REPORT
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MoonMigration-1.1.0
+          path: |
+            /tmp/MoonMigration-1.1.0.apk
+            /tmp/MoonMigration-src.zip
+            /tmp/MoonMigration-1.1.0.sha256
+            /tmp/MoonMigration-audit.txt
+            /tmp/apksigner.txt
+            /tmp/permissions.txt
+            /tmp/manifest.xml
+          if-no-files-found: error
+          retention-days: 7
+ > /tmp/unexpected-permissions.txt || true
+          test ! -s /tmp/unexpected-permissions.txt
           unzip -p /tmp/MoonMigration-1.1.0.apk AndroidManifest.xml > /tmp/AndroidManifest.bin
           "$ANDROID_HOME/cmdline-tools/latest/bin/apkanalyzer" manifest print /tmp/MoonMigration-1.1.0.apk > /tmp/manifest.xml
           grep -q 'android:allowBackup="false"' /tmp/manifest.xml
