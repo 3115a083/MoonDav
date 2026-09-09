@@ -200,16 +200,22 @@ func NewBackend(c Config) (Backend, error) {
 			return nil, errors.New("calibre-web requires MOONDAV_BACKEND_URL and MOONDAV_BACKEND_TOKEN")
 		}
 		return &CalibreWebBackend{base: c.BackendURL, token: c.BackendToken, client: cli}, nil
-	case "booklore", "kosync":
+	case "booklore", "kosync", "calibre-web-automated", "cwa":
 		key := c.BackendKey
 		if key == "" && c.BackendPassword != "" {
 			sum := md5.Sum([]byte(c.BackendPassword))
 			key = fmt.Sprintf("%x", sum)
 		}
 		if c.BackendURL == "" || c.BackendUser == "" || key == "" {
-			return nil, errors.New("booklore requires MOONDAV_BACKEND_URL, MOONDAV_BACKEND_USER and MOONDAV_BACKEND_PASSWORD or MOONDAV_BACKEND_KEY")
+			return nil, errors.New("KOReader-compatible backend requires MOONDAV_BACKEND_URL, MOONDAV_BACKEND_USER and MOONDAV_BACKEND_PASSWORD or MOONDAV_BACKEND_KEY")
 		}
-		return &KOBackend{base: c.BackendURL, user: c.BackendUser, key: key, client: cli}, nil
+		base := strings.TrimRight(c.BackendURL, "/")
+		if strings.EqualFold(c.BackendType, "calibre-web-automated") || strings.EqualFold(c.BackendType, "cwa") {
+			if !strings.HasSuffix(strings.ToLower(base), "/kosync") {
+				base += "/kosync"
+			}
+		}
+		return &KOBackend{base: base, user: c.BackendUser, key: key, client: cli}, nil
 	default:
 		return nil, fmt.Errorf("unsupported MOONDAV_BACKEND %q", c.BackendType)
 	}

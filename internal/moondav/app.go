@@ -145,7 +145,7 @@ func (a *App) push(bookKey string) {
 	if !entry.NextRetryAt.IsZero() && time.Now().UTC().Before(entry.NextRetryAt) {
 		return
 	}
-	bookID, ok := a.bookMap.Resolve(bookKey)
+	bookID, ok := a.resolveBackendID(bookKey)
 	if !ok {
 		entry.PendingSync = true
 		entry.PendingPercent = entry.Percent
@@ -340,7 +340,7 @@ func (a *App) reconcileLoop() {
 func (a *App) reconcile() {
 	now := time.Now().UTC()
 	for key, entry := range a.state.Snapshot() {
-		id, mapped := a.bookMap.Resolve(key)
+		id, mapped := a.resolveBackendID(key)
 		if !mapped {
 			continue
 		}
