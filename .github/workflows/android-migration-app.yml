@@ -131,7 +131,10 @@ jobs:
           "$AAPT" dump permissions /tmp/MoonMigration-1.1.0.apk | tee /tmp/permissions.txt
           grep -q "package: name='dev.moonmigration.app'" /tmp/badging.txt
           grep -q "uses-permission: name='android.permission.INTERNET'" /tmp/permissions.txt
-          grep "uses-permission:" /tmp/permissions.txt | sed -E "s/.*name='([^']+)'.*/\\1/" | grep -Ev '^(android.permission.INTERNET|dev.moonmigration.app.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION)
+          if grep "uses-permission:" /tmp/permissions.txt | grep -Ev "android.permission.INTERNET|dev\\.moonmigration\\.app\\.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION"; then
+            echo "Unexpected permission found" >&2
+            exit 1
+          fi
           unzip -p /tmp/MoonMigration-1.1.0.apk AndroidManifest.xml > /tmp/AndroidManifest.bin
           "$ANDROID_HOME/cmdline-tools/latest/bin/apkanalyzer" manifest print /tmp/MoonMigration-1.1.0.apk > /tmp/manifest.xml
           grep -q 'android:allowBackup="false"' /tmp/manifest.xml
