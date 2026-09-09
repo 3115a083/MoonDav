@@ -1,0 +1,56 @@
+name: Build Moon Migration Android app
+
+on:
+  push:
+    branches:
+      - build/moon-migration-app
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: Reconstruct source
+        shell: bash
+        run: |
+          set -euo pipefail
+          base64 -d .build/moon-migration-src.b64 > /tmp/moon-migration-src.zip
+          unzip -q /tmp/moon-migration-src.zip -d /tmp/src
+          rm -f /tmp/moon-migration-src.zip
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - name: Install Android SDK
+        run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - name: Unit tests
+        working-directory: /tmp/src/MoonMigration
+        run: gradle --no-daemon testDebugUnitTest
+      - name: Build release APK
+        working-directory: /tmp/src/MoonMigration
+        run: gradle --no-daemon assembleRelease
+      - name: Sign release with ephemeral build key
+        shell: bash
+        run: |
+          set -euo pipefail
+          PASS="$(openssl rand -hex 24)"
+          keytool -genkeypair -noprompt -keystore /tmp/release.jks -storepass "$PASS" -keypass "$PASS" -alias app \
+            -keyalg RSA -keysize 3072 -validity 3650 -dname "CN=Moon Migration Build,O=Local Build,C=DE"
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" sign --ks /tmp/release.jks --ks-pass "pass:$PASS" --key-pass "pass:$PASS" \
+            --out /tmp/MoonMigration-1.0.0.apk /tmp/src/MoonMigration/app/build/outputs/apk/release/app-release-unsigned.apk
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose /tmp/MoonMigration-1.0.0.apk
+          rm -f /tmp/release.jks
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MoonMigration-1.0.0
+          path: /tmp/MoonMigration-1.0.0.apk
+          if-no-files-found: error
+          retention-days: 7
