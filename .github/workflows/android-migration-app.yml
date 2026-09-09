@@ -43,11 +43,13 @@ jobs:
           k = kosync.read_text()
           k = k.replace("    private fun validateBaseUrl(raw: String, allowLan: Boolean, allowHttpLan: Boolean): URI {", "    internal fun validateBaseUrl(raw: String, allowLan: Boolean, allowHttpLan: Boolean): URI {")
           k = k.replace('require(scheme == "https" || (scheme == "http" && allowLan && allowHttpLan)) { "HTTPS required" }', 'require(scheme == "https" || scheme == "http") { "HTTPS required" }')
-          anchor = '            if (!allowLan) require(!isPrivate(address)) { "Private/LAN target requires explicit opt-in" }\\n        }\\n        val normalized ='
-          replacement = '            if (!allowLan) require(!isPrivate(address)) { "Private/LAN target requires explicit opt-in" }\\n        }\\n        if (scheme == "http") {\\n            require(allowLan && allowHttpLan && addresses.all(::isPrivate)) {\\n                "Unencrypted HTTP is allowed only for explicitly enabled private LAN targets"\\n            }\\n        }\\n        val normalized ='
-          if anchor not in k:
-              raise SystemExit("Expected KOSync validation anchor not found")
-          kosync.write_text(k.replace(anchor, replacement))
+          if "Unencrypted HTTP is allowed only for explicitly enabled private LAN targets" not in k:
+              marker = "        val normalized ="
+              if marker not in k:
+                  raise SystemExit("Expected KOSync URL normalization marker not found")
+              insert = '        if (scheme == "http") {\\n            require(allowLan && allowHttpLan && addresses.all(::isPrivate)) {\\n                "Unencrypted HTTP is allowed only for explicitly enabled private LAN targets"\\n            }\\n        }\\n'
+              k = k.replace(marker, insert + marker, 1)
+          kosync.write_text(k)
 
           test = Path("/tmp/src/MoonMigration/app/src/test/java/dev/moonmigration/app/UtilityTest.kt")
           t = test.read_text()
