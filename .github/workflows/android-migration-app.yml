@@ -39,6 +39,18 @@ jobs:
           r = r.replace('setAttribute(XMLConstants.ACCESS_EXTERNAL_SCHEMA, "")', 'setAttribute("http://javax.xml.XMLConstants/property/accessExternalSchema", "")')
           resolver.write_text(r)
 
+          manifest = Path("/tmp/src/MoonMigration/app/src/main/AndroidManifest.xml")
+          m = manifest.read_text()
+          if 'xmlns:tools=' not in m:
+              m = m.replace(
+                  '<manifest xmlns:android="http://schemas.android.com/apk/res/android">',
+                  '<manifest xmlns:android="http://schemas.android.com/apk/res/android" xmlns:tools="http://schemas.android.com/tools">'
+              )
+          receiver = '        <receiver android:name="androidx.profileinstaller.ProfileInstallReceiver" tools:node="remove" />\n'
+          if "androidx.profileinstaller.ProfileInstallReceiver" not in m:
+              m = m.replace("    </application>", receiver + "    </application>")
+          manifest.write_text(m)
+
           kosync = Path("/tmp/src/MoonMigration/app/src/main/java/dev/moonmigration/app/KoSyncClient.kt")
           k = kosync.read_text()
           k = k.replace("    private fun validateBaseUrl(raw: String, allowLan: Boolean, allowHttpLan: Boolean): URI {", "    internal fun validateBaseUrl(raw: String, allowLan: Boolean, allowHttpLan: Boolean): URI {")
