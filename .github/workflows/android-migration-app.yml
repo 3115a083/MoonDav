@@ -130,15 +130,45 @@ jobs:
           "$AAPT" dump badging /tmp/MoonMigration-1.1.0.apk | tee /tmp/badging.txt
           "$AAPT" dump permissions /tmp/MoonMigration-1.1.0.apk | tee /tmp/permissions.txt
           grep -q "package: name='dev.moonmigration.app'" /tmp/badging.txt
-          grep -q "uses-permission: name='android.permission.INTERNET'" /tmp/permissions.txt
-          test "$(grep -c "uses-permission:" /tmp/permissions.txt)" -le 2
-          grep -q "uses-permission: name='dev.moonmigration.app.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION'" /tmp/permissions.txt
-          unzip -p /tmp/MoonMigration-1.1.0.apk AndroidManifest.xml > /tmp/AndroidManifest.bin
-          "$ANDROID_HOME/cmdline-tools/latest/bin/apkanalyzer" manifest print /tmp/MoonMigration-1.1.0.apk > /tmp/manifest.xml
-          grep -q 'android:allowBackup="false"' /tmp/manifest.xml
-          grep -q 'android:usesCleartextTraffic="false"' /tmp/manifest.xml
-          test "$(grep -c 'android:exported="true"' /tmp/manifest.xml)" -eq 1
-          ! grep -Eq '<service[^>]+android:exported="true"|<receiver[^>]+android:exported="true"|<provider[^>]+android:exported="true"' /tmp/manifest.xml
+          "$ANDROID_HOME/cmdline-tools/latest/bin/apkanalyzer" manifest print /tmp/MoonMigration-1.1.0.apk | tee /tmp/manifest.xml
+          python3 - <<'PYAUDIT'
+          from pathlib import Path
+          import re
+          import xml.etree.ElementTree as ET
+
+          permissions = Path("/tmp/permissions.txt").read_text()
+          names = re.findall(r"uses-permission: name='([^']+)'", permissions)
+          allowed = {
+              "android.permission.INTERNET",
+              "dev.moonmigration.app.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION",
+          }
+          unexpected = sorted(set(names) - allowed)
+          if unexpected:
+              raise SystemExit(f"Unexpected permissions: {unexpected}")
+          if "android.permission.INTERNET" not in names:
+              raise SystemExit("INTERNET permission missing")
+          if len(names) > 2:
+              raise SystemExit(f"Too many permissions: {names}")
+
+          root = ET.parse("/tmp/manifest.xml").getroot()
+          ns = "{http://schemas.android.com/apk/res/android}"
+          app = root.find("application")
+          if app is None:
+              raise SystemExit("application element missing")
+          if app.get(ns + "allowBackup") != "false":
+              raise SystemExit("android:allowBackup is not false")
+          if app.get(ns + "usesCleartextTraffic") != "false":
+              raise SystemExit("android:usesCleartextTraffic is not false")
+
+          exported = []
+          for tag in ("activity", "activity-alias", "service", "receiver", "provider"):
+              for el in app.findall(tag):
+                  if el.get(ns + "exported") == "true":
+                      exported.append((tag, el.get(ns + "name", "")))
+          if exported != [("activity", "dev.moonmigration.app.MainActivity")]:
+              raise SystemExit(f"Unexpected exported components: {exported}")
+          print("Manifest audit OK")
+          PYAUDIT
 
       - name: APK privacy and secret audit
         shell: bash
