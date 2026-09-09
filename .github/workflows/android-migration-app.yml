@@ -24,6 +24,90 @@ jobs:
           unzip -t /tmp/MoonMigration-src.zip
           unzip -q /tmp/MoonMigration-src.zip -d /tmp/src
 
+      - name: Apply compile and network hardening fixes
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PYFIX'
+          from pathlib import Path
+
+          resolver = Path("/tmp/src/MoonMigration/app/src/main/java/dev/moonmigration/app/EpubPositionResolver.kt")
+          r = resolver.read_text()
+          r = r.replace("import javax.xml.XMLConstants\n", "")
+          r = r.replace('setAttribute(XMLConstants.ACCESS_EXTERNAL_DTD, "")',
+                        'setAttribute("http://javax.xml.XMLConstants/property/accessExternalDTD", "")')
+          r = r.replace('setAttribute(XMLConstants.ACCESS_EXTERNAL_SCHEMA, "")',
+                        'setAttribute("http://javax.xml.XMLConstants/property/accessExternalSchema", "")')
+          resolver.write_text(r)
+
+          kosync = Path("/tmp/src/MoonMigration/app/src/main/java/dev/moonmigration/app/KoSyncClient.kt")
+          k = kosync.read_text()
+          k = k.replace('    private fun validateBaseUrl(raw: String, allowLan: Boolean, allowHttpLan: Boolean): URI {',
+                        '    internal fun validateBaseUrl(raw: String, allowLan: Boolean, allowHttpLan: Boolean): URI {')
+          old = """        val scheme = uri.scheme?.lowercase(Locale.ROOT)
+        require(scheme == "https" || (scheme == "http" && allowLan && allowHttpLan)) { "HTTPS required" }
+        val addresses = InetAddress.getAllByName(uri.host)
+        require(addresses.isNotEmpty()) { "Host cannot be resolved" }
+        for (address in addresses) {
+            require(!address.isAnyLocalAddress && !address.isLoopbackAddress && !address.isLinkLocalAddress && !address.isMulticastAddress) {
+                "Unsafe network target"
+            }
+            if (!allowLan) require(!isPrivate(address)) { "Private/LAN target requires explicit opt-in" }
+        }
+"""
+          new = """        val scheme = uri.scheme?.lowercase(Locale.ROOT)
+        require(scheme == "https" || scheme == "http") { "HTTPS required" }
+        val addresses = InetAddress.getAllByName(uri.host)
+        require(addresses.isNotEmpty()) { "Host cannot be resolved" }
+        for (address in addresses) {
+            require(!address.isAnyLocalAddress && !address.isLoopbackAddress && !address.isLinkLocalAddress && !address.isMulticastAddress) {
+                "Unsafe network target"
+            }
+            if (!allowLan) require(!isPrivate(address)) { "Private/LAN target requires explicit opt-in" }
+        }
+        if (scheme == "http") {
+            require(allowLan && allowHttpLan && addresses.all(::isPrivate)) {
+                "Unencrypted HTTP is allowed only for explicitly enabled private LAN targets"
+            }
+        }
+"""
+          if old not in k:
+              raise SystemExit("Expected KOSync URL validation block not found")
+          kosync.write_text(k.replace(old, new))
+
+          test = Path("/tmp/src/MoonMigration/app/src/test/java/dev/moonmigration/app/UtilityTest.kt")
+          t = test.read_text()
+          extra = """
+    @Test fun allowsExplicitPrivateLanHttpOnly() {
+        val uri = KoSyncClient.validateBaseUrl("http://192.168.1.20:8080", allowLan = true, allowHttpLan = true)
+        assertEquals("http", uri.scheme)
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun rejectsPublicHttpEvenWhenLanHttpEnabled() {
+        KoSyncClient.validateBaseUrl("http://8.8.8.8", allowLan = true, allowHttpLan = true)
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun rejectsPrivateLanWithoutOptIn() {
+        KoSyncClient.validateBaseUrl("https://192.168.1.20", allowLan = false, allowHttpLan = false)
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun rejectsUrlUserInfo() {
+        KoSyncClient.validateBaseUrl("https://user:secret@8.8.8.8", allowLan = false, allowHttpLan = false)
+    }
+"""
+          if "allowsExplicitPrivateLanHttpOnly" not in t:
+              i = t.rfind("}")
+              test.write_text(t[:i] + extra + t[i:])
+          PYFIX
+
+          cd /tmp/src
+          rm -f /tmp/MoonMigration-src.zip
+          zip -qr /tmp/MoonMigration-src.zip MoonMigration -x '*/build/*' '*/.gradle/*' '*/.DS_Store'
+          unzip -t /tmp/MoonMigration-src.zip >/dev/null
+
       - name: Source privacy and secret audit
         shell: bash
         run: |
@@ -41,6 +125,7 @@ jobs:
           fi
           test "$(grep -RIl 'Synthetic annotation data\|Example Book\|Synthetic Author' "$SRC/app/src/test" | wc -l)" -ge 1
           ! grep -RInE --exclude-dir=build --exclude-dir=.gradle '/home/|/Users/|content://|file://' "$SRC"
+          test -z "$(find "$SRC" -type f \\( -name '*.po' -o -name '*.an' -o -name '*.mrexpt' -o -name '*.mrpro' \\) -print -quit)"
 
       - uses: actions/setup-java@v4
         with:
@@ -127,6 +212,7 @@ jobs:
           - Manifest/permission audit: PASS
           - APK secret/privacy scan: PASS
           - INTERNET is the only requested permission and is used solely for explicit KOReader/KOSync upload.
+          - HTTPS is required by default. Optional cleartext HTTP is restricted to explicitly enabled private LAN targets.
           - Android backup disabled and cleartext traffic disabled by default.
           - No analytics, telemetry, ads, WebView, services, receivers, or exported providers.
           REPORT
