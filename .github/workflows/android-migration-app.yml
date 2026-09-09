@@ -18,7 +18,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          base64 -d .build/moon-migration-src.b64 > /tmp/moon-migration-src.zip
+          cat .build/moonchunk_* | base64 -d > /tmp/moon-migration-src.zip
           unzip -q /tmp/moon-migration-src.zip -d /tmp/src
           rm -f /tmp/moon-migration-src.zip
       - uses: actions/setup-java@v4
