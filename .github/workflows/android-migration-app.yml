@@ -11,32 +11,83 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+
       - name: Reconstruct source
         shell: bash
         run: |
           set -euo pipefail
-          cat .build/moonchunk_* | base64 -d > /tmp/moon-migration-src.zip
+          cat .build/moonchunk_aa .build/moonchunk_ab .build/moonchunk_ac .build/moonchunk_ad .build/moonchunk_ae .build/moonchunk_af \
+            | base64 -d > /tmp/moon-migration-src.zip
           unzip -q /tmp/moon-migration-src.zip -d /tmp/src
           rm -f /tmp/moon-migration-src.zip
+
+      - name: Apply compile fixes
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          main = Path("/tmp/src/MoonMigration/app/src/main/java/dev/moonmigration/app/MainActivity.kt")
+          s = main.read_text()
+          s = s.replace("val text = TextView(this).apply {", "val titleView = TextView(this).apply {")
+          s = s.replace("addView(text,", "addView(titleView,")
+          main.write_text(s)
+
+          net = Path("/tmp/src/MoonMigration/app/src/main/java/dev/moonmigration/app/Net.kt")
+          s = net.read_text()
+          s = s.replace(
+              "headers.forEach { (name, value) ->",
+              "for ((name, value) in headers) {"
+          )
+          net.write_text(s)
+          PY
+
+      - name: Privacy and secret checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          SRC=/tmp/src/MoonMigration
+          if grep -RInE --exclude-dir=build --exclude-dir=.gradle \
+            '(AKIA[0-9A-Z]{16}|ASIA[0-9A-Z]{16}|gh[pousr]_[A-Za-z0-9_]{30,}|-----BEGIN ([A-Z ]+ )?PRIVATE KEY-----|AIza[0-9A-Za-z_-]{30,})' "$SRC"; then
+            echo "Potential embedded secret detected" >&2
+            exit 1
+          fi
+          if grep -RInE --include='*.kt' --include='*.xml' --include='*.kts' \
+            'http://[^"]+' "$SRC" | grep -vE '(schemas.android.com|www.w3.org)'; then
+            echo "Cleartext URL detected in app source" >&2
+            exit 1
+          fi
+
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
+
       - uses: android-actions/setup-android@v3
+
       - name: Install Android SDK
         run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
+
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
+
       - name: Unit tests
         working-directory: /tmp/src/MoonMigration
         run: gradle --no-daemon testDebugUnitTest
+
+      - name: Android lint
+        working-directory: /tmp/src/MoonMigration
+        run: gradle --no-daemon lintRelease
+
       - name: Build release APK
         working-directory: /tmp/src/MoonMigration
         run: gradle --no-daemon assembleRelease
+
       - name: Sign release with ephemeral build key
         shell: bash
         run: |
@@ -47,7 +98,9 @@ jobs:
           "$ANDROID_HOME/build-tools/35.0.0/apksigner" sign --ks /tmp/release.jks --ks-pass "pass:$PASS" --key-pass "pass:$PASS" \
             --out /tmp/MoonMigration-1.0.0.apk /tmp/src/MoonMigration/app/build/outputs/apk/release/app-release-unsigned.apk
           "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose /tmp/MoonMigration-1.0.0.apk
+          sha256sum /tmp/MoonMigration-1.0.0.apk
           rm -f /tmp/release.jks
+
       - uses: actions/upload-artifact@v4
         with:
           name: MoonMigration-1.0.0
