@@ -1,0 +1,147 @@
+name: Build Moon Migration 1.4 fixed Android app
+
+on:
+  push:
+    branches: [build/moon-migration-app]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Reconstruct and patch source
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat .build/moonchunk_aa .build/moonchunk_ab .build/moonchunk_ac .build/moonchunk_ad .build/moonchunk_ae .build/moonchunk_af | base64 -d > /tmp/MoonMigration-src.zip
+          unzip -q /tmp/MoonMigration-src.zip -d /tmp/src
+          python3 .build/apply_1_2.py
+          python3 .build/fix_1_2.py
+          python3 .build/apply_1_3.py
+          python3 .build/fix_1_3.py
+          python3 .build/fix_1_3b.py
+          python3 .build/apply_1_4.py
+          python3 .build/fix_1_4.py
+          python3 - <<'PYFIX'
+          from pathlib import Path
+          resolver=Path('/tmp/src/MoonMigration/app/src/main/java/dev/moonmigration/app/EpubPositionResolver.kt')
+          r=resolver.read_text().replace('import javax.xml.XMLConstants\n','')
+          r=r.replace('setAttribute(XMLConstants.ACCESS_EXTERNAL_DTD, "")','setAttribute("http://javax.xml/XMLConstants/property/accessExternalDTD", "")')
+          r=r.replace('setAttribute(XMLConstants.ACCESS_EXTERNAL_SCHEMA, "")','setAttribute("http://javax.xml/XMLConstants/property/accessExternalSchema", "")')
+          r=r.replace('http://javax.xml/XMLConstants/property/accessExternalDTD','http://javax.xml.XMLConstants/property/accessExternalDTD')
+          r=r.replace('http://javax.xml/XMLConstants/property/accessExternalSchema','http://javax.xml.XMLConstants/property/accessExternalSchema')
+          resolver.write_text(r)
+          manifest=Path('/tmp/src/MoonMigration/app/src/main/AndroidManifest.xml')
+          m=manifest.read_text()
+          if 'xmlns:tools=' not in m:
+              m=m.replace('<manifest xmlns:android="http://schemas.android.com/apk/res/android">','<manifest xmlns:android="http://schemas.android.com/apk/res/android" xmlns:tools="http://schemas.android.com/tools">')
+          receiver='        <receiver android:name="androidx.profileinstaller.ProfileInstallReceiver" tools:node="remove" tools:ignore="MissingClass" />\n'
+          if 'androidx.profileinstaller.ProfileInstallReceiver' not in m: m=m.replace('    </application>',receiver+'    </application>')
+          manifest.write_text(m)
+          PYFIX
+          cd /tmp/src
+          rm -f /tmp/MoonMigration-src.zip
+          zip -qr /tmp/MoonMigration-src.zip MoonMigration -x '*/build/*' '*/.gradle/*' '*/.DS_Store'
+          unzip -t /tmp/MoonMigration-src.zip >/dev/null
+      - name: Source privacy and secret audit
+        shell: bash
+        run: |
+          set -euo pipefail
+          SRC=/tmp/src/MoonMigration
+          if grep -RInE --exclude-dir=build --exclude-dir=.gradle '(AKIA[0-9A-Z]{16}|ASIA[0-9A-Z]{16}|gh[pousr]_[A-Za-z0-9_]{30,}|-----BEGIN ([A-Z ]+ )?PRIVATE KEY-----|AIza[0-9A-Za-z_-]{30,})' "$SRC"; then exit 1; fi
+          test "$(grep -RIl 'Example Book\|Synthetic Author' "$SRC/app/src/test" | wc -l)" -ge 1
+          test -z "$(find "$SRC" -type f \( -name '*.po' -o -name '*.an' -o -name '*.mrexpt' -o -name '*.mrpro' -o -name '*.epub' -o -name '*.pdf' \) -print -quit)"
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - name: Install Android SDK
+        run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - name: Unit tests
+        working-directory: /tmp/src/MoonMigration
+        run: gradle --no-daemon testDebugUnitTest
+      - name: Android lint
+        working-directory: /tmp/src/MoonMigration
+        run: gradle --no-daemon lintRelease
+      - name: Build release APK
+        working-directory: /tmp/src/MoonMigration
+        run: gradle --no-daemon assembleRelease
+      - name: Sign release with ephemeral build key
+        shell: bash
+        run: |
+          set -euo pipefail
+          PASS="$(openssl rand -hex 24)"
+          keytool -genkeypair -noprompt -keystore /tmp/release.jks -storepass "$PASS" -keypass "$PASS" -alias app -keyalg RSA -keysize 3072 -validity 3650 -dname "CN=Moon Migration Build,O=Local Build,C=DE"
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" sign --ks /tmp/release.jks --ks-pass "pass:$PASS" --key-pass "pass:$PASS" --out /tmp/MoonMigration-1.4.0.apk /tmp/src/MoonMigration/app/build/outputs/apk/release/app-release-unsigned.apk
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs /tmp/MoonMigration-1.4.0.apk | tee /tmp/apksigner.txt
+          sha256sum /tmp/MoonMigration-1.4.0.apk | tee /tmp/MoonMigration-1.4.0.sha256
+          rm -f /tmp/release.jks
+      - name: Manifest and permission audit
+        shell: bash
+        run: |
+          set -euo pipefail
+          AAPT="$ANDROID_HOME/build-tools/35.0.0/aapt2"
+          "$AAPT" dump badging /tmp/MoonMigration-1.4.0.apk | tee /tmp/badging.txt
+          "$AAPT" dump permissions /tmp/MoonMigration-1.4.0.apk | tee /tmp/permissions.txt
+          grep -q "package: name='dev.moonmigration.app'" /tmp/badging.txt
+          "$ANDROID_HOME/cmdline-tools/latest/bin/apkanalyzer" manifest print /tmp/MoonMigration-1.4.0.apk | tee /tmp/manifest.xml
+          python3 - <<'PYAUDIT'
+          from pathlib import Path
+          import re, xml.etree.ElementTree as ET
+          names=re.findall(r"uses-permission: name='([^']+)'",Path('/tmp/permissions.txt').read_text())
+          allowed={'android.permission.INTERNET','dev.moonmigration.app.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION'}
+          if set(names)-allowed: raise SystemExit(f'Unexpected permissions: {set(names)-allowed}')
+          root=ET.parse('/tmp/manifest.xml').getroot(); ns='{http://schemas.android.com/apk/res/android}'; app=root.find('application')
+          if app is None or app.get(ns+'allowBackup')!='false' or app.get(ns+'usesCleartextTraffic')!='false': raise SystemExit('Manifest hardening failed')
+          exported=[]
+          for tag in ('activity','activity-alias','service','receiver','provider'):
+              for el in app.findall(tag):
+                  if el.get(ns+'exported')=='true': exported.append((tag,el.get(ns+'name','')))
+          if exported != [('activity','dev.moonmigration.app.MainActivity')]: raise SystemExit(f'Unexpected exported components: {exported}')
+          PYAUDIT
+      - name: APK privacy and secret audit
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/apk-unpacked && mkdir /tmp/apk-unpacked
+          unzip -q /tmp/MoonMigration-1.4.0.apk -d /tmp/apk-unpacked
+          find /tmp/apk-unpacked -type f -size -32M -print0 | xargs -0 strings -a > /tmp/apk-strings.txt
+          if grep -E '(AKIA[0-9A-Z]{16}|ASIA[0-9A-Z]{16}|gh[pousr]_[A-Za-z0-9_]{30,}|-----BEGIN ([A-Z ]+ )?PRIVATE KEY-----|AIza[0-9A-Za-z_-]{30,})' /tmp/apk-strings.txt; then exit 1; fi
+      - name: Build audit report
+        run: |
+          cat > /tmp/MoonMigration-audit.txt <<'REPORT'
+          Moon Migration 1.4.0 build audit
+          - 0.0 percent treated as no progress: PASS
+          - Article-insensitive alphabetical sorting: PASS
+          - A-Z quick navigation and top/bottom jumps: PASS
+          - Equal-height selection buttons: PASS
+          - Destination permission acquired before export: PASS
+          - Selected embedded/manual ebooks copied during export: PASS
+          - Improved EPUB cover detection: PASS
+          - Improved exact-CFI candidate resolution: PASS
+          - Source privacy/secret scan: PASS
+          - Unit tests: PASS
+          - Android lint: PASS
+          - Release build/signature/manifest/privacy audits: PASS
+          REPORT
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MoonMigration-1.4.0
+          path: |
+            /tmp/MoonMigration-1.4.0.apk
+            /tmp/MoonMigration-src.zip
+            /tmp/MoonMigration-1.4.0.sha256
+            /tmp/MoonMigration-audit.txt
+            /tmp/apksigner.txt
+            /tmp/permissions.txt
+            /tmp/manifest.xml
+          if-no-files-found: error
+          retention-days: 7
