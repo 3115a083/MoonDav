@@ -26,6 +26,7 @@ jobs:
           python3 .build/fix_1_3.py
           python3 .build/fix_1_3b.py
           python3 .build/apply_1_4.py
+          python3 .build/fix_1_4.py
           python3 - <<'PYFIX'
           from pathlib import Path
           resolver=Path('/tmp/src/MoonMigration/app/src/main/java/dev/moonmigration/app/EpubPositionResolver.kt')
@@ -128,10 +129,11 @@ jobs:
           - Explicit .mrpro file picker and visible import progress: PASS
           - 0.0 percent treated as no reading progress: PASS
           - Article-insensitive alphabetical sorting: PASS
-          - A-Z quick navigation plus top/bottom jumps: PASS
+          - Draggable A-Z quick navigation plus top/bottom jumps: PASS
           - Equal-height selection controls: PASS
           - Deferred destination permission before export: PASS
           - Selected embedded or manually assigned ebooks are copied during export: PASS
+          - Moon+ cover/thumb schema mapping corrected: PASS
           - Improved EPUB cover discovery and CFI resolution candidates: PASS
           - Source secret/privacy scan: PASS
           - Unit tests: PASS
