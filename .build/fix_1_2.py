@@ -27,6 +27,10 @@ main.write_text(s)
 ko = root/'app/src/main/java/dev/moonmigration/app/KoSyncClient.kt'
 s = ko.read_text()
 s = s.replace('    private fun validateBaseUrl(raw: String, allowLan: Boolean, allowHttpLan: Boolean): URI {', '    internal fun validateBaseUrl(raw: String, allowLan: Boolean, allowHttpLan: Boolean): URI {')
+# Enforce HTTPS regardless of the exact historical validator expression.
+if 'require(scheme == "https") { "HTTPS required" }' not in s:
+    s, n = re.subn(r'(\n\s*val scheme\s*=.*?\n)', r'\1        require(scheme == "https") { "HTTPS required" }\n', s, count=1)
+    if n != 1: raise SystemExit('could not inject HTTPS-only validation')
 s = s.replace('require(scheme == "https" || scheme == "http") { "HTTPS required" }', 'require(scheme == "https") { "HTTPS required" }')
 s = re.sub(r'\n        if \(scheme == "http"\) \{.*?\n        \}\n        val normalized =', '\n        val normalized =', s, flags=re.S)
 s = s.replace('''                val percent = book.moonPosition?.percent\n                val ebook = book.ebookUri\n                if (percent == null || ebook == null) {\n                    skipped++\n                    continue\n                }\n                val document = when (config.documentIdMode) {\n                    DocumentIdMode.PARTIAL_MD5 -> {\n                        val hash = partialMd5(context, ebook)''', '''                val percent = book.moonPosition?.percent\n                if (percent == null) {\n                    skipped++\n                    continue\n                }\n                val document = when (config.documentIdMode) {\n                    DocumentIdMode.PARTIAL_MD5 -> {\n                        val ebook = book.ebookUri\n                        if (ebook == null) { skipped++; continue }\n                        val hash = partialMd5(context, ebook)''')
