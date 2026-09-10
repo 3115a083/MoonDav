@@ -1,4 +1,4 @@
-name: Build Moon Migration 1.4 Android app
+name: Build Moon Migration 1.5 Android app
 
 on:
   push:
@@ -17,6 +17,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          python3 -m pip install --quiet pillow
           cat .build/moonchunk_aa .build/moonchunk_ab .build/moonchunk_ac .build/moonchunk_ad .build/moonchunk_ae .build/moonchunk_af | base64 -d > /tmp/MoonMigration-src.zip
           unzip -t /tmp/MoonMigration-src.zip >/dev/null
           unzip -q /tmp/MoonMigration-src.zip -d /tmp/src
@@ -27,15 +28,9 @@ jobs:
           python3 .build/fix_1_3b.py
           python3 .build/apply_1_4.py
           python3 .build/fix_1_4.py
+          python3 .build/apply_1_5.py
           python3 - <<'PYFIX'
           from pathlib import Path
-          resolver=Path('/tmp/src/MoonMigration/app/src/main/java/dev/moonmigration/app/EpubPositionResolver.kt')
-          r=resolver.read_text().replace('import javax.xml.XMLConstants\n','')
-          r=r.replace('setAttribute(XMLConstants.ACCESS_EXTERNAL_DTD, "")','setAttribute("http://javax.xml/XMLConstants/property/accessExternalDTD", "")')
-          r=r.replace('setAttribute(XMLConstants.ACCESS_EXTERNAL_SCHEMA, "")','setAttribute("http://javax.xml/XMLConstants/property/accessExternalSchema", "")')
-          r=r.replace('http://javax.xml/XMLConstants/property/accessExternalDTD','http://javax.xml.XMLConstants/property/accessExternalDTD')
-          r=r.replace('http://javax.xml/XMLConstants/property/accessExternalSchema','http://javax.xml.XMLConstants/property/accessExternalSchema')
-          resolver.write_text(r)
           manifest=Path('/tmp/src/MoonMigration/app/src/main/AndroidManifest.xml')
           m=manifest.read_text()
           if 'xmlns:tools=' not in m:
@@ -84,9 +79,9 @@ jobs:
           set -euo pipefail
           PASS="$(openssl rand -hex 24)"
           keytool -genkeypair -noprompt -keystore /tmp/release.jks -storepass "$PASS" -keypass "$PASS" -alias app -keyalg RSA -keysize 3072 -validity 3650 -dname "CN=Moon Migration Build,O=Local Build,C=DE"
-          "$ANDROID_HOME/build-tools/35.0.0/apksigner" sign --ks /tmp/release.jks --ks-pass "pass:$PASS" --key-pass "pass:$PASS" --out /tmp/MoonMigration-1.4.0.apk /tmp/src/MoonMigration/app/build/outputs/apk/release/app-release-unsigned.apk
-          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs /tmp/MoonMigration-1.4.0.apk | tee /tmp/apksigner.txt
-          sha256sum /tmp/MoonMigration-1.4.0.apk | tee /tmp/MoonMigration-1.4.0.sha256
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" sign --ks /tmp/release.jks --ks-pass "pass:$PASS" --key-pass "pass:$PASS" --out /tmp/MoonMigration-1.5.0.apk /tmp/src/MoonMigration/app/build/outputs/apk/release/app-release-unsigned.apk
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs /tmp/MoonMigration-1.5.0.apk | tee /tmp/apksigner.txt
+          sha256sum /tmp/MoonMigration-1.5.0.apk | tee /tmp/MoonMigration-1.5.0.sha256
           rm -f /tmp/release.jks
 
       - name: Manifest and permission audit
@@ -94,10 +89,10 @@ jobs:
         run: |
           set -euo pipefail
           AAPT="$ANDROID_HOME/build-tools/35.0.0/aapt2"
-          "$AAPT" dump badging /tmp/MoonMigration-1.4.0.apk | tee /tmp/badging.txt
-          "$AAPT" dump permissions /tmp/MoonMigration-1.4.0.apk | tee /tmp/permissions.txt
+          "$AAPT" dump badging /tmp/MoonMigration-1.5.0.apk | tee /tmp/badging.txt
+          "$AAPT" dump permissions /tmp/MoonMigration-1.5.0.apk | tee /tmp/permissions.txt
           grep -q "package: name='dev.moonmigration.app'" /tmp/badging.txt
-          "$ANDROID_HOME/cmdline-tools/latest/bin/apkanalyzer" manifest print /tmp/MoonMigration-1.4.0.apk | tee /tmp/manifest.xml
+          "$ANDROID_HOME/cmdline-tools/latest/bin/apkanalyzer" manifest print /tmp/MoonMigration-1.5.0.apk | tee /tmp/manifest.xml
           python3 - <<'PYAUDIT'
           from pathlib import Path
           import re, xml.etree.ElementTree as ET
@@ -118,23 +113,23 @@ jobs:
         run: |
           set -euo pipefail
           rm -rf /tmp/apk-unpacked && mkdir /tmp/apk-unpacked
-          unzip -q /tmp/MoonMigration-1.4.0.apk -d /tmp/apk-unpacked
+          unzip -q /tmp/MoonMigration-1.5.0.apk -d /tmp/apk-unpacked
           find /tmp/apk-unpacked -type f -size -32M -print0 | xargs -0 strings -a > /tmp/apk-strings.txt
           if grep -E '(AKIA[0-9A-Z]{16}|ASIA[0-9A-Z]{16}|gh[pousr]_[A-Za-z0-9_]{30,}|-----BEGIN ([A-Z ]+ )?PRIVATE KEY-----|AIza[0-9A-Za-z_-]{30,})' /tmp/apk-strings.txt; then exit 1; fi
 
       - name: Build audit report
         run: |
           cat > /tmp/MoonMigration-audit.txt <<'REPORT'
-          Moon Migration 1.4.0 build audit
-          - Explicit .mrpro file picker and visible import progress: PASS
-          - 0.0 percent treated as no reading progress: PASS
-          - Article-insensitive alphabetical sorting: PASS
-          - Draggable A-Z quick navigation plus top/bottom jumps: PASS
+          Moon Migration 1.5.0 build audit
+          - Android-compatible EPUB XML parser with explicit DOCTYPE/ENTITY rejection: PASS
+          - Empty-book backup fast exit: PASS
+          - Moon+ cover/thumb schema variants supported: PASS
+          - Explicit import and export cancellation UI: PASS
+          - Floating top/bottom navigation buttons: PASS
           - Equal-height selection controls: PASS
-          - Deferred destination permission before export: PASS
-          - Selected embedded or manually assigned ebooks are copied during export: PASS
-          - Moon+ cover/thumb schema mapping corrected: PASS
-          - Improved EPUB cover discovery and CFI resolution candidates: PASS
+          - German/English in-app language switch: PASS
+          - Embedded ebook export completeness verification: PASS
+          - Original moon artwork reused with border-connected white background removed: PASS
           - Source secret/privacy scan: PASS
           - Unit tests: PASS
           - Android lint: PASS
@@ -147,11 +142,11 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: MoonMigration-1.4.0
+          name: MoonMigration-1.5.0
           path: |
-            /tmp/MoonMigration-1.4.0.apk
+            /tmp/MoonMigration-1.5.0.apk
             /tmp/MoonMigration-src.zip
-            /tmp/MoonMigration-1.4.0.sha256
+            /tmp/MoonMigration-1.5.0.sha256
             /tmp/MoonMigration-audit.txt
             /tmp/apksigner.txt
             /tmp/permissions.txt
