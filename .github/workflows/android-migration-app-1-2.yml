@@ -23,6 +23,7 @@ jobs:
           python3 .build/apply_1_2.py
           python3 .build/fix_1_2.py
           python3 .build/apply_1_3.py
+          python3 .build/fix_1_3.py
           python3 - <<'PYFIX'
           from pathlib import Path
           resolver=Path('/tmp/src/MoonMigration/app/src/main/java/dev/moonmigration/app/EpubPositionResolver.kt')
