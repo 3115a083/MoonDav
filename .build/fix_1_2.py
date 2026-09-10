@@ -13,8 +13,11 @@ models.write_text(s)
 main = root/'app/src/main/java/dev/moonmigration/app/MainActivity.kt'
 s = main.read_text()
 s = s.replace('private lateinit var koAllowHttpLan: CheckBox\n', '')
-s = s.replace('private val chooseSource = registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->\n        if (uri != null) {\n            persistTreePermission(uri)\n            sourceUri = uri\n            sourceStatus.setText(R.string.source_selected)\n        }\n    }', '''private val chooseSource = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->\n        if (uri != null) {\n            try { contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) } catch (_: SecurityException) { }\n            sourceUri = uri\n            sourceStatus.setText(R.string.source_selected)\n            scanBackup()\n        }\n    }''')
-s = s.replace('val pick = button(R.string.choose_source) { chooseSource.launch(sourceUri) }', 'val pick = button(R.string.choose_source) { chooseSource.launch(arrayOf("application/octet-stream", "application/zip", "application/x-zip-compressed", "*/*")) }')
+source_block = re.compile(r'    private val chooseSource = registerForActivityResult\(ActivityResultContracts\.OpenDocumentTree\(\)\) \{ uri ->.*?\n    \}\n', re.S)
+replacement = '''    private val chooseSource = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->\n        if (uri != null) {\n            try { contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) } catch (_: SecurityException) { }\n            sourceUri = uri\n            sourceStatus.setText(R.string.source_selected)\n            scanBackup()\n        }\n    }\n'''
+s, n = source_block.subn(replacement, s, count=1)
+if n != 1: raise SystemExit('chooseSource launcher patch did not apply')
+s = re.sub(r'val pick = button\(R\.string\.choose_source\) \{ chooseSource\.launch\([^\n]*\) \}', 'val pick = button(R.string.choose_source) { chooseSource.launch(arrayOf("application/octet-stream", "application/zip", "application/x-zip-compressed", "*/*")) }', s, count=1)
 s = s.replace('            koAllowHttpLan = CheckBox(this).apply { setText(R.string.kosync_allow_http_lan) }\n            body.addView(koAllowHttpLan)\n', '')
 s = s.replace('val found = LocalScanner.scan(this, uri) { cancelled.get() || Thread.currentThread().isInterrupted }', 'val found = MrproImporter.importBackup(this, uri) { cancelled.get() || Thread.currentThread().isInterrupted }')
 s = s.replace('allowHttpLan = koAllowHttpLan.isChecked,', 'allowHttpLan = false,')
