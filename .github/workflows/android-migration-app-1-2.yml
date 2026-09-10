@@ -27,8 +27,16 @@ jobs:
           python3 .build/fix_1_3.py
           python3 .build/fix_1_3b.py
           python3 .build/apply_1_4.py
-          python3 .build/fix_1_4.py
+          python3 - <<'PYNORM'
+          from pathlib import Path
+          p=Path('/tmp/src/MoonMigration/app/src/main/java/dev/moonmigration/app/EpubPositionResolver.kt')
+          s=p.read_text().replace('import javax.xml.XMLConstants\n','')
+          s=s.replace('setAttribute(XMLConstants.ACCESS_EXTERNAL_DTD, "")','setAttribute("http://javax.xml.XMLConstants/property/accessExternalDTD", "")')
+          s=s.replace('setAttribute(XMLConstants.ACCESS_EXTERNAL_SCHEMA, "")','setAttribute("http://javax.xml.XMLConstants/property/accessExternalSchema", "")')
+          p.write_text(s)
+          PYNORM
           python3 .build/apply_1_5.py
+          python3 .build/fix_1_4.py
           python3 - <<'PYFIX'
           from pathlib import Path
           manifest=Path('/tmp/src/MoonMigration/app/src/main/AndroidManifest.xml')
