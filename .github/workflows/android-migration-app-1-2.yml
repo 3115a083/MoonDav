@@ -36,6 +36,7 @@ jobs:
           p.write_text(s)
           PYNORM
           python3 .build/apply_1_5.py
+          python3 .build/fix_1_5.py
           python3 .build/fix_1_4.py
           python3 - <<'PYFIX'
           from pathlib import Path
